@@ -359,13 +359,13 @@ export default function App() {
                 </thead>
                 <tbody>
                   {ladderEntries.map((entry, index) => {
-                    const isSelected = selectedTeamId === entry.teamId
+                    const teamId = entry.teamId ?? null;
+                    const isSelected = selectedTeamId === teamId;
                     return (
                       <tr
-                        key={entry.teamId ? entry.teamId : `${entry.teamName}-${index}`}
-                        onClick={() => setSelectedTeamId(prev => (prev === (entry.teamId ?? null) ? null : entry.teamId ?? null))}
-                        style={{ cursor: entry.teamId ? 'pointer' : 'default', backgroundColor: isSelected ? '#fff7cc' : undefined }}
-                      >
+                        key={teamId ? teamId : `${entry.teamName}-${index}`}
+                        onClick={() => setSelectedTeamId(prev => prev === teamId ? null : teamId)}
+                        style={{ cursor: teamId ? 'pointer' : 'default', backgroundColor: isSelected ? '#fff7cc' : undefined }}
                         <td style={{ textAlign: 'left' }}>{entry.teamName}</td>
                         <td style={{ textAlign: 'center' }}>{entry.played ?? '–'}</td>
                         <td style={{ textAlign: 'center' }}>{entry.wins ?? '–'}</td>
