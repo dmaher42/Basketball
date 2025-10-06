@@ -1,0 +1,26 @@
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; background: #fff; color: #111; }
+.container { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+.card { border: 1px solid #e5e5e5; border-radius: 16px; padding: 16px; }
+.btn { border: 1px solid #d4d4d4; border-radius: 14px; padding: 8px 12px; background: #fff; cursor: pointer; }
+.btn:hover { background: #f6f6f6; }
+.btn-dark { background: #111; color: #fff; border-color: #111; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 8px; }
+.badge-dark { background:#111; color:#fff; }
+.badge-light { background:#f1f1f1; color:#333; }
+.row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.tabs { display:flex; gap:8px; overflow-x:auto; }
+input.search { width:100%; padding: 12px 36px 12px 12px; border:1px solid #d4d4d4; border-radius:16px; }
+.search-wrap { position:relative; }
+.search-icon { position:absolute; right:10px; top:50%; transform: translateY(-50%); color:#666; }
+.dropdown { position:absolute; left:0; right:0; top:44px; background:#fff; border:1px solid #e5e5e5; border-radius:16px; box-shadow: 0 12px 30px rgba(0,0,0,0.06); overflow:hidden; }
+table { width:100%; border-collapse: collapse; }
+th, td { padding: 8px 12px; }
+thead { background: #f8f8f8; }
+tr:nth-child(even) td { background: #fcfcfc; }
+.muted { color:#666; }
+.small { font-size: 12px; }
+.title { font-weight:700; }
+.pill { border:1px solid #e5e5e5; border-radius:16px; padding: 6px 10px; font-size: 14px; }
+.highlight { background: #fff7cc; }
