@@ -1,7 +1,7 @@
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
 body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; background: #fff; color: #111; }
-.container { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+.container { max-width: 900px; margin: 0 auto; padding: 0 16px; }
 .card { border: 1px solid #e5e5e5; border-radius: 16px; padding: 16px; }
 .btn { border: 1px solid #d4d4d4; border-radius: 14px; padding: 8px 12px; background: #fff; cursor: pointer; }
 .btn:hover { background: #f6f6f6; }
@@ -24,3 +24,12 @@ tr:nth-child(even) td { background: #fcfcfc; }
 .title { font-weight:700; }
 .pill { border:1px solid #e5e5e5; border-radius:16px; padding: 6px 10px; font-size: 14px; }
 .highlight { background: #fff7cc; }
+
+.selector-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #111; }
+.field-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; }
+.field-input { padding: 10px 12px; border-radius: 14px; border: 1px solid #d4d4d4; font-size: 14px; background: #fff; }
+.field-input:disabled { background: #f5f5f5; color: #888; cursor: not-allowed; }
+.field-help { font-size: 12px; color: #d00; }
+
+tr.highlight td { background: #fff4bf; }
