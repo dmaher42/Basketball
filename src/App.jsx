@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 
-const MATCHES_URL = 'https://api-basketball.squadi.com/livescores/round/matches?competitionId=1944&divisionId=16238&teamIds=&ignoreStatuses=%5B1%5D'
-const LADDER_URL = 'https://registration.basketballconnect.com/livescorePublicLadder?organisationKey=3416293c-d99b-47de-8866-74a6138f0740&yearId=8&includeRecentMatchData=true&competitionUniqueKey=9c187248-330d-4a95-8c4e-903bf4c4a3cf&divisionId=16241'
+const ORG_KEY = '3416293c-d99b-47de-8866-74a6138f0740'
+const YEAR_REF_ID = 8
+const API_BASE = 'https://api-basketball.squadi.com/livescores'
+const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
+const IGNORE_STATUSES = encodeURIComponent(JSON.stringify([1]))
 
 const TABS = [
-  { id: 'fixtures', label: 'Fixtures' },
   { id: 'ladder', label: 'Ladder' },
-  { id: 'player-stats', label: 'Player stats' }
+  { id: 'fixtures', label: 'Fixtures' },
+  { id: 'player-stats', label: 'Player Stats' }
 ]
 
 const ladderFieldFallbacks = {
@@ -52,7 +55,7 @@ function pickFirstAvailable(source, candidates) {
 function normaliseLadderEntry(entry) {
   const rawTeamId = pickFirstAvailable(entry, ladderFieldFallbacks.teamId)
 
-  const normalised = {
+  return {
     teamId: rawTeamId == null ? undefined : String(rawTeamId),
     teamName: pickFirstAvailable(entry, ladderFieldFallbacks.teamName) ?? 'Unknown team',
     played: toNumber(pickFirstAvailable(entry, ladderFieldFallbacks.played)),
@@ -64,8 +67,6 @@ function normaliseLadderEntry(entry) {
     forPoints: toNumber(pickFirstAvailable(entry, ladderFieldFallbacks.forPoints)),
     againstPoints: toNumber(pickFirstAvailable(entry, ladderFieldFallbacks.againstPoints))
   }
-
-  return normalised
 }
 
 function extractLadderArray(raw) {
@@ -77,7 +78,9 @@ function extractLadderArray(raw) {
     'ladder',
     'ladderList',
     'ladderListData',
+    'ladderData',
     'ladders',
+    'rows',
     'data',
     'result',
     'results',
@@ -123,15 +126,32 @@ function formatDateTime(isoString) {
     return { date: 'Date TBA', time: 'Time TBA' }
   }
   return {
-    date: date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
-    time: date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    date: date.toLocaleDateString(undefined, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    }),
+    time: date.toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit'
+    })
   }
 }
 
-function MatchCard({ match }) {
+function MatchCard({ match, selectedTeamId }) {
   const { date, time } = formatDateTime(match.startTime || match.originalStartTime)
+  const team1Selected =
+    selectedTeamId != null && match.team1?.id != null && String(match.team1.id) === String(selectedTeamId)
+  const team2Selected =
+    selectedTeamId != null && match.team2?.id != null && String(match.team2.id) === String(selectedTeamId)
   const score1 = typeof match.team1Score === 'number' ? match.team1Score : '–'
   const score2 = typeof match.team2Score === 'number' ? match.team2Score : '–'
+  const highlightStyle = {
+    fontWeight: 700,
+    color: '#111'
+  }
+
   return (
     <li className="card" style={{ marginBottom: 12, padding: 16, listStyle: 'none' }}>
       <div className="small muted" style={{ marginBottom: 4 }}>
@@ -139,12 +159,18 @@ function MatchCard({ match }) {
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
         <div>
-          <div className="title" style={{ marginBottom: 4 }}>{match.team1?.name ?? 'TBD'}</div>
-          <div className="title">{match.team2?.name ?? 'TBD'}</div>
+          <div className="title" style={{ marginBottom: 4, ...(team1Selected ? highlightStyle : null) }}>
+            {match.team1?.name ?? 'TBD'}
+          </div>
+          <div className="title" style={team2Selected ? highlightStyle : null}>
+            {match.team2?.name ?? 'TBD'}
+          </div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className="title" style={{ fontWeight: 700 }}>{score1} – {score2}</div>
-          {match.resultStatus && <div className="small muted" style={{ marginTop: 4 }}>{match.resultStatus}</div>}
+          {match.resultStatus && (
+            <div className="small muted" style={{ marginTop: 4 }}>{match.resultStatus}</div>
+          )}
         </div>
       </div>
       {match.venueCourt?.venue?.name && (
@@ -156,244 +182,634 @@ function MatchCard({ match }) {
   )
 }
 
+function ErrorCard({ message }) {
+  if (!message) return null
+  return (
+    <div
+      className="card"
+      style={{ padding: 16, marginBottom: 16, color: '#d00', background: '#fee', border: '1px solid #f99' }}
+    >
+      <strong>Error:</strong> {message}
+    </div>
+  )
+}
+
+function LoadingMessage({ text }) {
+  if (!text) return null
+  return <p className="small muted" style={{ margin: '16px 0' }}>{text}</p>
+}
+
+function CompetitionSelectors({
+  competitions,
+  competitionLoading,
+  competitionError,
+  selectedCompetitionId,
+  onCompetitionChange,
+  divisions,
+  divisionLoading,
+  divisionError,
+  selectedDivisionId,
+  onDivisionChange
+}) {
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
+      <div className="selector-grid">
+        <label className="field">
+          <span className="field-label">Competition</span>
+          <select
+            className="field-input"
+            value={selectedCompetitionId ?? ''}
+            onChange={(event) => onCompetitionChange(Number(event.target.value))}
+            disabled={competitionLoading || competitions.length === 0}
+          >
+            {competitions.length === 0 && <option value="">{competitionLoading ? 'Loading…' : 'No competitions'}</option>}
+            {competitions.map((competition) => (
+              <option key={competition.id} value={competition.id}>
+                {competition.longName || competition.name}
+              </option>
+            ))}
+          </select>
+          {competitionError && <span className="field-help">{competitionError}</span>}
+        </label>
+
+        <label className="field">
+          <span className="field-label">Division</span>
+          <select
+            className="field-input"
+            value={selectedDivisionId ?? ''}
+            onChange={(event) => onDivisionChange(Number(event.target.value))}
+            disabled={divisionLoading || divisions.length === 0}
+          >
+            {divisions.length === 0 && <option value="">{divisionLoading ? 'Loading…' : 'No divisions'}</option>}
+            {divisions.map((division) => (
+              <option key={division.id} value={division.id}>
+                {division.name}
+              </option>
+            ))}
+          </select>
+          {divisionError && <span className="field-help">{divisionError}</span>}
+        </label>
+      </div>
+    </div>
+  )
+}
+
+function LadderTable({
+  ladderRows,
+  loading,
+  error,
+  onSelectTeam,
+  selectedTeamId
+}) {
+  if (loading) {
+    return <LoadingMessage text="Loading ladder…" />
+  }
+
+  if (error) {
+    return <ErrorCard message={error} />
+  }
+
+  if (!ladderRows || ladderRows.length === 0) {
+    return <p>No ladder data available.</p>
+  }
+
+  return (
+    <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+      <table>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left' }}>#</th>
+            <th style={{ textAlign: 'left' }}>Team</th>
+            <th>P</th>
+            <th>W</th>
+            <th>L</th>
+            <th>F</th>
+            <th>A</th>
+            <th>Pts</th>
+            <th style={{ textAlign: 'left' }}>Form</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ladderRows.map((team, index) => {
+            const teamId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
+            const isSelected = selectedTeamId != null && String(selectedTeamId) === String(teamId)
+            const rowKey = teamId ?? `${team.name ?? team.teamName ?? 'team'}-${index}`
+
+            return (
+              <tr
+                key={rowKey}
+                className={isSelected ? 'highlight' : undefined}
+                style={{ cursor: teamId ? 'pointer' : 'default' }}
+                onClick={teamId == null ? undefined : () => onSelectTeam(teamId)}
+              >
+                <td>{team.rk ?? team.rank ?? team.position ?? '–'}</td>
+                <td>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span className="title" style={{ fontWeight: 600 }}>{team.name ?? team.teamName ?? 'Unknown team'}</span>
+                    <span className="small muted">{team.divisionName ?? team.poolName ?? ''}</span>
+                  </div>
+                </td>
+                <td>{team.played ?? team.P ?? team.playedGames ?? '–'}</td>
+                <td>{team.wins ?? team.W ?? team.won ?? '–'}</td>
+                <td>{team.losses ?? team.L ?? team.lost ?? '–'}</td>
+                <td>{team.forPoints ?? team.F ?? team.for ?? '–'}</td>
+                <td>{team.againstPoints ?? team.A ?? team.against ?? '–'}</td>
+                <td>{team.points ?? team.PTS ?? team.totalPoints ?? '–'}</td>
+                <td>
+                  <span className="small muted">{team.form?.join(' ') || '–'}</span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function FixturesView({
+  matches,
+  loading,
+  error,
+  selectedTeamId,
+  selectedTeamName,
+  onClearTeam
+}) {
+  if (loading) {
+    return <LoadingMessage text="Loading fixtures…" />
+  }
+
+  if (error) {
+    return <ErrorCard message={error} />
+  }
+
+  if (!matches || matches.length === 0) {
+    return <p>No fixtures available.</p>
+  }
+
+  return (
+    <div>
+      {selectedTeamId && (
+        <div className="pill" style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          Viewing matches for <strong>{selectedTeamName}</strong>
+          <button className="btn" style={{ padding: '4px 8px' }} onClick={onClearTeam}>
+            Clear
+          </button>
+        </div>
+      )}
+      <ul style={{ padding: 0, margin: 0 }}>
+        {matches.map((match) => (
+          <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export default function App() {
-  const [matches, setMatches] = useState([])
-  const [matchesLoading, setMatchesLoading] = useState(true)
-  const [matchesError, setMatchesError] = useState(null)
-  const [ladderEntries, setLadderEntries] = useState([])
-  const [ladderLoading, setLadderLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('ladder')
+
+  const [competitions, setCompetitions] = useState([])
+  const [competitionLoading, setCompetitionLoading] = useState(true)
+  const [competitionError, setCompetitionError] = useState(null)
+  const [selectedCompetitionId, setSelectedCompetitionId] = useState(null)
+
+  const [divisions, setDivisions] = useState([])
+  const [divisionLoading, setDivisionLoading] = useState(false)
+  const [divisionError, setDivisionError] = useState(null)
+  const [selectedDivisionId, setSelectedDivisionId] = useState(null)
+
+  const [ladderState, setLadderState] = useState({ rows: [], lastResults: [], nextResults: [] })
+  const [ladderLoading, setLadderLoading] = useState(false)
   const [ladderError, setLadderError] = useState(null)
-  const [activeTab, setActiveTab] = useState('fixtures')
+
+  const [matches, setMatches] = useState([])
+  const [matchesLoading, setMatchesLoading] = useState(false)
+  const [matchesError, setMatchesError] = useState(null)
+
   const [selectedTeamId, setSelectedTeamId] = useState(null)
 
+  const handleTeamSelection = useCallback((teamId) => {
+    setSelectedTeamId((current) => {
+      if (teamId == null) {
+        return null
+      }
+      const nextValue = String(teamId)
+      return String(current) === nextValue ? null : nextValue
+    })
+  }, [])
+
   useEffect(() => {
-    let isMounted = true
-    async function fetchMatches() {
-      setMatchesLoading(true)
-      setMatchesError(null)
+    let cancelled = false
+
+    async function fetchCompetitions() {
+      setCompetitionLoading(true)
+      setCompetitionError(null)
       try {
-        const response = await fetch(MATCHES_URL)
+        const response = await fetch(
+          `${API_BASE}/competitions/list?organisationUniqueKey=${ORG_KEY}&yearRefId=${YEAR_REF_ID}`
+        )
         if (!response.ok) {
           throw new Error(`Request failed with status ${response.status}`)
         }
         const data = await response.json()
-        const allMatches = (data.rounds || []).flatMap(round =>
-          (round.matches || []).map(match => ({
-            ...match,
-            round: match.round || { name: round.name }
-          }))
-        )
-        if (isMounted) {
-          setMatches(allMatches)
+        if (!cancelled) {
+          setCompetitions(Array.isArray(data) ? data : [])
+          if (Array.isArray(data) && data.length > 0) {
+            setSelectedCompetitionId(data[0].id)
+          }
         }
-      } catch (err) {
-        if (isMounted) {
-          setMatchesError(err.message || 'Failed to load matches')
+      } catch (error) {
+        if (!cancelled) {
+          setCompetitionError(error.message || 'Failed to load competitions')
         }
       } finally {
-        if (isMounted) {
-          setMatchesLoading(false)
+        if (!cancelled) {
+          setCompetitionLoading(false)
         }
       }
     }
 
-    fetchMatches()
+    fetchCompetitions()
 
     return () => {
-      isMounted = false
+      cancelled = true
     }
   }, [])
 
+  const selectedCompetition = useMemo(
+    () => competitions.find((competition) => competition.id === selectedCompetitionId) || null,
+    [competitions, selectedCompetitionId]
+  )
+
   useEffect(() => {
-    let isMounted = true
+    if (!selectedCompetition) {
+      setDivisions([])
+      setSelectedDivisionId(null)
+      return
+    }
+
+    let cancelled = false
+    setDivisionLoading(true)
+    setDivisionError(null)
+    setDivisions([])
+
+    async function fetchDivisions() {
+      try {
+        const response = await fetch(`${API_BASE}/division?competitionId=${selectedCompetition.id}`)
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`)
+        }
+        const data = await response.json()
+        if (!cancelled) {
+          setDivisions(Array.isArray(data) ? data : [])
+          if (Array.isArray(data) && data.length > 0) {
+            setSelectedDivisionId(data[0].id)
+          } else {
+            setSelectedDivisionId(null)
+          }
+          setSelectedTeamId(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setDivisionError(error.message || 'Failed to load divisions')
+          setSelectedDivisionId(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setDivisionLoading(false)
+        }
+      }
+    }
+
+    fetchDivisions()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedCompetition])
+
+  useEffect(() => {
+    if (!selectedCompetition || !selectedDivisionId) {
+      setLadderState({ rows: [], lastResults: [], nextResults: [] })
+      setMatches([])
+      return
+    }
+
+    let cancelled = false
 
     async function fetchLadder() {
       setLadderLoading(true)
       setLadderError(null)
       try {
-        const response = await fetch(LADDER_URL)
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`)
+        const ladderParams = new URLSearchParams({
+          organisationKey: ORG_KEY,
+          yearId: String(YEAR_REF_ID),
+          includeRecentMatchData: 'true',
+          competitionUniqueKey: selectedCompetition.uniqueKey,
+          divisionId: String(selectedDivisionId)
+        })
+
+        async function requestLadder(url) {
+          const response = await fetch(url)
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`)
+          }
+          return parseLadderResponse(response)
         }
-        const raw = await parseLadderResponse(response)
-        const ladderArray = extractLadderArray(raw)
-        const parsed = ladderArray.map(normaliseLadderEntry).filter(entry => entry.teamName)
-        if (!parsed.length) {
-          throw new Error('No ladder data available')
+
+        let ladderData
+        try {
+          ladderData = await requestLadder(`${LADDER_BASE_URL}?${ladderParams.toString()}`)
+        } catch (ladderError) {
+          const fallbackParams = new URLSearchParams({
+            divisionIds: String(selectedDivisionId),
+            competitionKey: selectedCompetition.uniqueKey
+          })
+          ladderData = await requestLadder(`${API_BASE}/teams/ladder/v2?${fallbackParams.toString()}`)
         }
-        if (isMounted) {
-          setLadderEntries(parsed)
+
+        if (!cancelled) {
+          const rows = normalizeLadderRows(ladderData)
+          const lastResults = normalizeRecentResults(ladderData)
+          const nextResults = Array.isArray(ladderData?.nextResults)
+            ? ladderData.nextResults
+            : Array.isArray(ladderData?.recentMatchData?.nextResults)
+              ? ladderData.recentMatchData.nextResults
+              : []
+
+          setLadderState({ rows, lastResults, nextResults })
+          setSelectedTeamId((current) =>
+            rows.some((team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(current))
+              ? current
+              : null
+          )
         }
-      } catch (err) {
-        if (isMounted) {
-          setLadderError(err.message || 'Failed to load ladder')
+      } catch (error) {
+        if (!cancelled) {
+          setLadderError(error.message || 'Failed to load ladder')
+          setLadderState({ rows: [], lastResults: [], nextResults: [] })
         }
       } finally {
-        if (isMounted) {
+        if (!cancelled) {
           setLadderLoading(false)
         }
       }
     }
 
+    async function fetchMatches() {
+      setMatchesLoading(true)
+      setMatchesError(null)
+      try {
+        const url = `${API_BASE}/round/matches?competitionId=${selectedCompetition.id}&divisionId=${selectedDivisionId}&teamIds=&ignoreStatuses=${IGNORE_STATUSES}`
+        const response = await fetch(url)
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`)
+        }
+        const data = await response.json()
+        const allMatches = (data.rounds || []).flatMap((round) =>
+          (round.matches || []).map((match) => ({
+            ...match,
+            round: match.round || { name: round.name }
+          }))
+        )
+        if (!cancelled) {
+          setMatches(allMatches)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMatchesError(error.message || 'Failed to load fixtures')
+          setMatches([])
+        }
+      } finally {
+        if (!cancelled) {
+          setMatchesLoading(false)
+        }
+      }
+    }
+
     fetchLadder()
+    fetchMatches()
 
     return () => {
-      isMounted = false
+      cancelled = true
     }
-  }, [])
+  }, [selectedCompetition, selectedDivisionId])
+
+  const ladderRows = useMemo(() => {
+    const lastResultsMap = new Map()
+    for (const item of ladderState.lastResults || []) {
+      const key = item.teamId ?? item.team?.id ?? item.teamUniqueKey
+      lastResultsMap.set(String(key), item.last5 || item.form || [])
+    }
+
+    return (ladderState.rows || []).map((team) => {
+      const id = team.id ?? team.teamId ?? team.teamUniqueKey
+      const formEntries = lastResultsMap.get(String(id)) || []
+      return {
+        ...team,
+        id,
+        name: team.name ?? team.teamName ?? team.team?.name,
+        form: formEntries.map((entry) => {
+          const code = typeof entry === 'string' ? entry : entry.code || entry.result || entry.outcome
+          if (!code) return '–'
+          const upperCode = code.toUpperCase()
+          if (upperCode.startsWith('W')) return 'W'
+          if (upperCode.startsWith('D')) return 'D'
+          if (upperCode.startsWith('L')) return 'L'
+          return upperCode[0]
+        })
+      }
+    })
+  }, [ladderState])
+
+  const selectedTeam = useMemo(() => {
+    if (!selectedTeamId) return null
+    return (
+      ladderRows.find(
+        (team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(selectedTeamId)
+      ) || null
+    )
+  }, [ladderRows, selectedTeamId])
 
   const filteredMatches = useMemo(() => {
-    if (!selectedTeamId) return matches
-    return matches.filter(match => String(match.team1?.id) === selectedTeamId || String(match.team2?.id) === selectedTeamId)
+    if (!selectedTeamId) {
+      return matches
+    }
+    return matches.filter((match) => {
+      const team1Id = match.team1?.id != null ? String(match.team1.id) : null
+      const team2Id = match.team2?.id != null ? String(match.team2.id) : null
+      return team1Id === String(selectedTeamId) || team2Id === String(selectedTeamId)
+    })
   }, [matches, selectedTeamId])
 
-  const selectedTeamName = useMemo(() => {
-    if (!selectedTeamId) return null
-    const fromMatches = matches.find(match => String(match.team1?.id) === selectedTeamId || String(match.team2?.id) === selectedTeamId)
-    if (fromMatches) {
-      return String(fromMatches.team1?.id) === selectedTeamId ? fromMatches.team1?.name : fromMatches.team2?.name
-    }
-    const fromLadder = ladderEntries.find(entry => entry.teamId === selectedTeamId)
-    return fromLadder?.teamName ?? null
-  }, [ladderEntries, matches, selectedTeamId])
-
   return (
-    <div className="container" style={{ padding: 24, maxWidth: 720, margin: '0 auto' }}>
+    <div className="container" style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
       <header style={{ marginBottom: 24 }}>
         <h1 style={{ marginBottom: 8 }}>Live Scores</h1>
-        <p className="small muted">Latest results from competition 1944 · division 16238</p>
+        <p className="small muted">Browse ladders, fixtures and player stats for BasketballConnect competitions.</p>
       </header>
 
+      <CompetitionSelectors
+        competitions={competitions}
+        competitionLoading={competitionLoading}
+        competitionError={competitionError}
+        selectedCompetitionId={selectedCompetitionId}
+        onCompetitionChange={setSelectedCompetitionId}
+        divisions={divisions}
+        divisionLoading={divisionLoading}
+        divisionError={divisionError}
+        selectedDivisionId={selectedDivisionId}
+        onDivisionChange={(divisionId) => {
+          setSelectedDivisionId(divisionId)
+          setSelectedTeamId(null)
+        }}
+      />
+
+      <TeamSelector
+        teams={ladderRows}
+        selectedTeamId={selectedTeamId}
+        onSelectTeam={handleTeamSelection}
+      />
+
       <nav className="tabs" style={{ marginBottom: 24 }}>
-        {TABS.map(tab => (
+        {TABS.map((tab) => (
           <button
             key={tab.id}
-            type="button"
+            className={`btn ${activeTab === tab.id ? 'btn-dark' : ''}`}
             onClick={() => setActiveTab(tab.id)}
-            className="btn"
-            style={{
-              borderRadius: 16,
-              padding: '8px 16px',
-              fontWeight: activeTab === tab.id ? 600 : 400,
-              backgroundColor: activeTab === tab.id ? '#111' : '#fff',
-              color: activeTab === tab.id ? '#fff' : '#111',
-              borderColor: activeTab === tab.id ? '#111' : '#d4d4d4'
-            }}
           >
             {tab.label}
           </button>
         ))}
       </nav>
 
-      {activeTab === 'fixtures' && (
-        <section>
-          {matchesLoading && <p>Loading matches…</p>}
-          {matchesError && (
-            <div className="card" style={{ padding: 16, marginBottom: 16, color: '#d00', background: '#fee', border: '1px solid #f99' }}>
-              <strong>Error:</strong> {matchesError}
-            </div>
-          )}
-
-          {!matchesLoading && !matchesError && filteredMatches.length === 0 && (
-            <p>
-              {selectedTeamId
-                ? 'No fixtures found for the selected team.'
-                : 'No matches available.'}
-            </p>
-          )}
-
-          {!matchesLoading && !matchesError && filteredMatches.length > 0 && (
-            <>
-              {selectedTeamId && selectedTeamName && (
-                <div className="small muted" style={{ marginBottom: 12 }}>
-                  Showing fixtures for <strong>{selectedTeamName}</strong>.
-                  {' '}
-                  <button
-                    type="button"
-                    className="btn"
-                    style={{ marginLeft: 8, padding: '4px 10px' }}
-                    onClick={() => setSelectedTeamId(null)}
-                  >
-                    Clear
-                  </button>
-                </div>
-              )}
-              <ul style={{ padding: 0, margin: 0 }}>
-                {filteredMatches.map(match => (
-                  <MatchCard key={match.id} match={match} />
-                ))}
-              </ul>
-            </>
-          )}
-        </section>
+      {activeTab === 'ladder' && (
+        <div>
+          <p className="small muted" style={{ marginBottom: 12 }}>
+            Click or tap a team to highlight it and filter fixtures.
+          </p>
+          <LadderTable
+            ladderRows={ladderRows}
+            loading={ladderLoading}
+            error={ladderError}
+            onSelectTeam={handleTeamSelection}
+            selectedTeamId={selectedTeamId}
+          />
+        </div>
       )}
 
-      {activeTab === 'ladder' && (
-        <section>
-          {ladderLoading && <p>Loading ladder…</p>}
-          {ladderError && (
-            <div className="card" style={{ padding: 16, marginBottom: 16, color: '#d00', background: '#fee', border: '1px solid #f99' }}>
-              <strong>Error:</strong> {ladderError}
-            </div>
-          )}
-
-          {!ladderLoading && !ladderError && ladderEntries.length === 0 && (
-            <p>No ladder information available.</p>
-          )}
-
-          {!ladderLoading && !ladderError && ladderEntries.length > 0 && (
-            <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left' }}>Team</th>
-                    <th>P</th>
-                    <th>W</th>
-                    <th>L</th>
-                    <th>D</th>
-                    <th>Pts</th>
-                    <th>%</th>
-                    <th>For</th>
-                    <th>Agst</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ladderEntries.map((entry, index) => {
-                    const isSelected = selectedTeamId === entry.teamId
-                    return (
-                      <tr
-                        key={entry.teamId ? entry.teamId : `${entry.teamName}-${index}`}
-                        onClick={() => setSelectedTeamId(prev => (prev === (entry.teamId ?? null) ? null : entry.teamId ?? null))}
-                        style={{ cursor: entry.teamId ? 'pointer' : 'default', backgroundColor: isSelected ? '#fff7cc' : undefined }}
-                      >
-                        <td style={{ textAlign: 'left' }}>{entry.teamName}</td>
-                        <td style={{ textAlign: 'center' }}>{entry.played ?? '–'}</td>
-                        <td style={{ textAlign: 'center' }}>{entry.wins ?? '–'}</td>
-                        <td style={{ textAlign: 'center' }}>{entry.losses ?? '–'}</td>
-                        <td style={{ textAlign: 'center' }}>{entry.draws ?? '–'}</td>
-                        <td style={{ textAlign: 'center' }}>{entry.points ?? '–'}</td>
-                        <td style={{ textAlign: 'center' }}>{entry.percentage ?? '–'}</td>
-                        <td style={{ textAlign: 'center' }}>{entry.forPoints ?? '–'}</td>
-                        <td style={{ textAlign: 'center' }}>{entry.againstPoints ?? '–'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+      {activeTab === 'fixtures' && (
+        <FixturesView
+          matches={filteredMatches}
+          loading={matchesLoading}
+          error={matchesError}
+          selectedTeamId={selectedTeamId}
+          selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
+          onClearTeam={() => handleTeamSelection(null)}
+        />
       )}
 
       {activeTab === 'player-stats' && (
-        <section>
-          <div className="card" style={{ padding: 16 }}>
-            <p className="small muted" style={{ margin: 0 }}>
-              Player statistics are not available yet. Please check back later.
+        <div className="card" style={{ padding: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Player statistics</h2>
+          {selectedTeamId ? (
+            <p className="muted">
+              Player statistics for <strong>{selectedTeam?.name ?? selectedTeam?.teamName}</strong> are not available via the
+              public API yet. Check back later!
             </p>
-          </div>
-        </section>
+          ) : (
+            <p className="muted">Select a team from the ladder or dropdown to view their player statistics when available.</p>
+          )}
+        </div>
       )}
     </div>
   )
+}
+
+function TeamSelector({ teams, selectedTeamId, onSelectTeam }) {
+  const sortedTeams = useMemo(() => {
+    return [...(teams || [])]
+      .map((team) => ({
+        id: team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName,
+        name: team.name ?? team.teamName ?? team.team?.name ?? 'Unknown team'
+      }))
+      .filter((team) => team.id != null && team.name)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [teams])
+
+  if (sortedTeams.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
+      <label className="field" style={{ marginBottom: 0 }}>
+        <span className="field-label">Team</span>
+        <select
+          className="field-input"
+          value={selectedTeamId ?? ''}
+          onChange={(event) => {
+            const value = event.target.value
+            onSelectTeam(value === '' ? null : String(value))
+          }}
+        >
+          <option value="">All teams</option>
+          {sortedTeams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+        </select>
+        <span className="field-help">Use the dropdown or click a team in the ladder to focus their fixtures.</span>
+      </label>
+    </div>
+  )
+}
+
+function normalizeLadderRows(ladderData) {
+  if (!ladderData) {
+    return []
+  }
+
+  const ladderArray = extractLadderArray(ladderData)
+
+  if (!Array.isArray(ladderArray) || ladderArray.length === 0) {
+    return []
+  }
+
+  return ladderArray.map((team) => {
+    const normalised = normaliseLadderEntry(team)
+    const resolvedId =
+      normalised.teamId ?? team.id ?? team.teamId ?? team.teamUniqueKey ?? team.team?.id ?? normalised.teamName
+    const resolvedName = normalised.teamName ?? team.name ?? team.teamName ?? team.team?.name
+
+    return {
+      ...team,
+      ...normalised,
+      id: resolvedId,
+      name: resolvedName
+    }
+  })
+}
+
+function normalizeRecentResults(ladderData) {
+  if (!ladderData) {
+    return []
+  }
+
+  const candidates = [
+    ladderData?.lastResults,
+    ladderData?.recentMatchData?.lastResults,
+    ladderData?.recentMatches,
+    ladderData?.ladderRecentMatchData?.lastResults
+  ]
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate
+    }
+  }
+
+  return []
 }
