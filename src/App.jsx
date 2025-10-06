@@ -1,17 +1,95 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import carnivalData from './data/mb_carnival.json'
 
-const ORG_KEY = '3416293c-d99b-47de-8866-74a6138f0740'
-const YEAR_REF_ID = 8
+const DEFAULT_ORG_KEY = '3416293c-d99b-47de-8866-74a6138f0740'
+const DEFAULT_YEAR_REF_ID = 8
 const API_BASE = 'https://api-basketball.squadi.com/livescores'
 const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
 const IGNORE_STATUSES = encodeURIComponent(JSON.stringify([1]))
+
+const CONTEXTS_STORAGE_KEY = 'bc:tournamentContexts'
+const ACTIVE_CONTEXT_STORAGE_KEY = 'bc:activeTournamentContextId'
+const DEFAULT_CONTEXT = {
+  id: 'default',
+  label: 'Murray Bridge Carnival',
+  orgKey: DEFAULT_ORG_KEY,
+  yearRefId: DEFAULT_YEAR_REF_ID
+}
 
 const TABS = [
   { id: 'ladder', label: 'Ladder' },
   { id: 'fixtures', label: 'Fixtures' },
   { id: 'player-stats', label: 'Player Stats' }
 ]
+
+function generateContextId() {
+  return `ctx-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`
+}
+
+function sanitizeContexts(contexts) {
+  if (!Array.isArray(contexts)) return [DEFAULT_CONTEXT]
+  const map = new Map()
+  for (const context of contexts) {
+    if (!context || typeof context !== 'object') continue
+    const orgKey = typeof context.orgKey === 'string' ? context.orgKey.trim() : ''
+    const yearRefId = Number(context.yearRefId)
+    if (!orgKey || Number.isNaN(yearRefId)) continue
+    const combinationKey = `${orgKey}-${yearRefId}`
+    const id = typeof context.id === 'string' && context.id ? context.id : `${orgKey}-${yearRefId}`
+    const label = typeof context.label === 'string' && context.label.trim()
+      ? context.label.trim()
+      : `${orgKey.slice(0, 8)}… (${yearRefId})`
+    const normalizedContext = { id, label, orgKey, yearRefId }
+    if (map.has(combinationKey)) {
+      map.delete(combinationKey)
+    }
+    map.set(combinationKey, normalizedContext)
+  }
+  const orderedContexts = []
+  const idSet = new Set()
+  for (const context of map.values()) {
+    let contextId = context.id
+    while (idSet.has(contextId)) {
+      contextId = `${contextId}-${Math.random().toString(36).slice(2, 6)}`
+    }
+    idSet.add(contextId)
+    orderedContexts.push({ ...context, id: contextId })
+  }
+
+  const otherContexts = orderedContexts.filter(
+    (context) =>
+      context.id !== DEFAULT_CONTEXT.id &&
+      (context.orgKey !== DEFAULT_CONTEXT.orgKey || context.yearRefId !== DEFAULT_CONTEXT.yearRefId)
+  )
+
+  return [DEFAULT_CONTEXT, ...otherContexts]
+}
+
+function loadStoredContexts() {
+  if (typeof window === 'undefined') return [DEFAULT_CONTEXT]
+  try {
+    const stored = window.localStorage.getItem(CONTEXTS_STORAGE_KEY)
+    if (!stored) return [DEFAULT_CONTEXT]
+    const parsed = JSON.parse(stored)
+    return sanitizeContexts(parsed)
+  } catch (error) {
+    console.warn('Failed to load stored tournament contexts', error)
+    return [DEFAULT_CONTEXT]
+  }
+}
+
+function loadStoredActiveContextId(contexts) {
+  if (typeof window === 'undefined') return contexts[0]?.id ?? DEFAULT_CONTEXT.id
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_CONTEXT_STORAGE_KEY)
+    if (stored && contexts.some((context) => context.id === stored)) {
+      return stored
+    }
+  } catch (error) {
+    console.warn('Failed to load active tournament context', error)
+  }
+  return contexts[0]?.id ?? DEFAULT_CONTEXT.id
+}
 
 function formatDateTime(isoString) {
   if (!isoString) {
@@ -93,6 +171,181 @@ function ErrorCard({ message }) {
 function LoadingMessage({ text }) {
   if (!text) return null
   return <p className="small muted" style={{ margin: '16px 0' }}>{text}</p>
+}
+
+function TournamentManager({
+  contexts,
+  activeContextId,
+  onSelectContext,
+  onAddContext,
+  onRemoveContext
+}) {
+  const [label, setLabel] = useState('')
+  const [orgKey, setOrgKey] = useState('')
+  const [year, setYear] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [preview, setPreview] = useState(null)
+
+  const orderedContexts = contexts
+
+  async function handleSearch(event) {
+    event.preventDefault()
+    const trimmedOrgKey = orgKey.trim()
+    const parsedYear = Number(year)
+    if (!trimmedOrgKey || Number.isNaN(parsedYear)) {
+      setError('Enter a valid organisation key and year.')
+      setPreview(null)
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    setPreview(null)
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/competitions/list?organisationUniqueKey=${encodeURIComponent(trimmedOrgKey)}&yearRefId=${parsedYear}`
+      )
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`)
+      }
+      const data = await response.json()
+      if (!Array.isArray(data) || data.length === 0) {
+        setError('No competitions found for that organisation and year.')
+        setPreview(null)
+        return
+      }
+      const suggestedLabel = label.trim() || data[0].longName || data[0].name || 'Tournament'
+      setPreview({
+        label: suggestedLabel,
+        orgKey: trimmedOrgKey,
+        yearRefId: parsedYear,
+        competitionCount: data.length
+      })
+      setError(null)
+    } catch (searchError) {
+      setError(searchError.message || 'Search failed. Please try again.')
+      setPreview(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleAddPreview() {
+    if (!preview) return
+    const newContext = onAddContext({
+      label: preview.label,
+      orgKey: preview.orgKey,
+      yearRefId: preview.yearRefId
+    })
+    if (newContext) {
+      setLabel('')
+      setOrgKey('')
+      setYear('')
+      setPreview(null)
+      setError(null)
+    }
+  }
+
+  const activeContext = contexts.find((context) => context.id === activeContextId)
+
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
+      <h2 style={{ marginTop: 0 }}>Tournaments</h2>
+
+      <div className="field" style={{ marginBottom: 16 }}>
+        <label className="field-label" htmlFor="active-tournament">
+          Active tournament
+        </label>
+        <select
+          id="active-tournament"
+          className="field-input"
+          value={activeContextId ?? ''}
+          onChange={(event) => onSelectContext(event.target.value)}
+        >
+          {orderedContexts.map((context) => (
+            <option key={context.id} value={context.id}>
+              {context.label} · {context.yearRefId}
+            </option>
+          ))}
+        </select>
+        <p className="field-help">
+          {activeContext
+            ? `Organisation key: ${activeContext.orgKey}`
+            : 'Select a tournament to load its competitions.'}
+        </p>
+        {activeContext && activeContext.id !== DEFAULT_CONTEXT.id && (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => onRemoveContext(activeContext.id)}
+            style={{ marginTop: 8 }}
+          >
+            Remove this tournament
+          </button>
+        )}
+      </div>
+
+      <form onSubmit={handleSearch} className="field" style={{ marginBottom: 0 }}>
+        <h3 style={{ margin: '16px 0 8px' }}>Find another tournament</h3>
+        <label className="field-label" htmlFor="tournament-label">
+          Display name (optional)
+        </label>
+        <input
+          id="tournament-label"
+          className="field-input"
+          type="text"
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+          placeholder="e.g. State Championships"
+        />
+
+        <label className="field-label" htmlFor="tournament-org" style={{ marginTop: 12 }}>
+          Organisation key
+        </label>
+        <input
+          id="tournament-org"
+          className="field-input"
+          type="text"
+          value={orgKey}
+          onChange={(event) => setOrgKey(event.target.value)}
+          placeholder="Paste the BasketballConnect organisation key"
+          required
+        />
+
+        <label className="field-label" htmlFor="tournament-year" style={{ marginTop: 12 }}>
+          Year reference ID
+        </label>
+        <input
+          id="tournament-year"
+          className="field-input"
+          type="number"
+          value={year}
+          onChange={(event) => setYear(event.target.value)}
+          placeholder="e.g. 8"
+          required
+          min="1"
+        />
+
+        <button type="submit" className="btn btn-dark" style={{ marginTop: 16 }} disabled={loading}>
+          {loading ? 'Searching…' : 'Search'}
+        </button>
+
+        {error && <p className="field-help" style={{ color: '#c00' }}>{error}</p>}
+        {preview && !error && (
+          <div className="card" style={{ marginTop: 16, padding: 12, background: '#f8fafc' }}>
+            <p style={{ margin: '0 0 8px' }}>
+              Found {preview.competitionCount} competitions for this tournament.
+            </p>
+            <button type="button" className="btn" onClick={handleAddPreview}>
+              Add “{preview.label}”
+            </button>
+          </div>
+        )}
+      </form>
+    </div>
+  )
 }
 
 function CompetitionSelectors({
@@ -263,6 +516,54 @@ function FixturesView({
 export default function App() {
   const [activeTab, setActiveTab] = useState('ladder')
 
+  const [tournamentContexts, setTournamentContexts] = useState(() => loadStoredContexts())
+  const [activeContextId, setActiveContextId] = useState(() =>
+    loadStoredActiveContextId(loadStoredContexts())
+  )
+
+  useEffect(() => {
+    setTournamentContexts((contexts) => sanitizeContexts(contexts))
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(CONTEXTS_STORAGE_KEY, JSON.stringify(tournamentContexts))
+    } catch (error) {
+      console.warn('Failed to persist tournament contexts', error)
+    }
+  }, [tournamentContexts])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      if (activeContextId) {
+        window.localStorage.setItem(ACTIVE_CONTEXT_STORAGE_KEY, activeContextId)
+      } else {
+        window.localStorage.removeItem(ACTIVE_CONTEXT_STORAGE_KEY)
+      }
+    } catch (error) {
+      console.warn('Failed to persist active tournament context', error)
+    }
+  }, [activeContextId])
+
+  useEffect(() => {
+    if (!tournamentContexts.some((context) => context.id === activeContextId)) {
+      setActiveContextId(tournamentContexts[0]?.id ?? DEFAULT_CONTEXT.id)
+    }
+  }, [tournamentContexts, activeContextId])
+
+  const activeContext = useMemo(
+    () =>
+      tournamentContexts.find((context) => context.id === activeContextId) ??
+      tournamentContexts[0] ??
+      DEFAULT_CONTEXT,
+    [tournamentContexts, activeContextId]
+  )
+
+  const organisationKey = activeContext?.orgKey ?? DEFAULT_ORG_KEY
+  const yearRefId = activeContext?.yearRefId ?? DEFAULT_YEAR_REF_ID
+
   const [competitions, setCompetitions] = useState([])
   const [competitionLoading, setCompetitionLoading] = useState(true)
   const [competitionError, setCompetitionError] = useState(null)
@@ -283,6 +584,47 @@ export default function App() {
 
   const [selectedTeamId, setSelectedTeamId] = useState(null)
 
+  function handleSelectContext(contextId) {
+    if (tournamentContexts.some((context) => context.id === contextId)) {
+      setActiveContextId(contextId)
+    }
+  }
+
+  function handleAddContext({ label, orgKey, yearRefId }) {
+    const trimmedOrgKey = typeof orgKey === 'string' ? orgKey.trim() : ''
+    const numericYear = Number(yearRefId)
+    if (!trimmedOrgKey || Number.isNaN(numericYear)) {
+      return null
+    }
+    const normalizedLabel = label && label.trim()
+      ? label.trim()
+      : `${trimmedOrgKey.slice(0, 8)}… (${numericYear})`
+    const newContext = {
+      id: generateContextId(),
+      label: normalizedLabel,
+      orgKey: trimmedOrgKey,
+      yearRefId: numericYear
+    }
+    setTournamentContexts((previous) => sanitizeContexts([...previous, newContext]))
+    setActiveContextId(newContext.id)
+    return newContext
+  }
+
+  function handleRemoveContext(contextId) {
+    if (contextId === DEFAULT_CONTEXT.id) return
+    setTournamentContexts((previous) =>
+      sanitizeContexts(previous.filter((context) => context.id !== contextId))
+    )
+  }
+
+  useEffect(() => {
+    setCompetitions([])
+    setSelectedCompetitionId(null)
+    setDivisions([])
+    setSelectedDivisionId(null)
+    setSelectedTeamId(null)
+  }, [organisationKey, yearRefId])
+
   useEffect(() => {
     let cancelled = false
 
@@ -291,7 +633,7 @@ export default function App() {
       setCompetitionError(null)
       try {
         const response = await fetch(
-          `${API_BASE}/competitions/list?organisationUniqueKey=${ORG_KEY}&yearRefId=${YEAR_REF_ID}`
+          `${API_BASE}/competitions/list?organisationUniqueKey=${organisationKey}&yearRefId=${yearRefId}`
         )
         if (!response.ok) {
           throw new Error(`Request failed with status ${response.status}`)
@@ -314,12 +656,14 @@ export default function App() {
       }
     }
 
-    fetchCompetitions()
+    if (organisationKey && yearRefId) {
+      fetchCompetitions()
+    }
 
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [organisationKey, yearRefId])
 
   const selectedCompetition = useMemo(
     () => competitions.find((competition) => competition.id === selectedCompetitionId) || null,
@@ -387,8 +731,8 @@ export default function App() {
       setLadderError(null)
       try {
         const ladderParams = new URLSearchParams({
-          organisationKey: ORG_KEY,
-          yearId: String(YEAR_REF_ID),
+          organisationKey,
+          yearId: String(yearRefId),
           includeRecentMatchData: 'true',
           competitionUniqueKey: selectedCompetition.uniqueKey,
           divisionId: String(selectedDivisionId)
@@ -549,6 +893,14 @@ export default function App() {
         <h1 style={{ marginBottom: 8 }}>Live Scores</h1>
         <p className="small muted">Browse ladders, fixtures and player stats for BasketballConnect competitions.</p>
       </header>
+
+      <TournamentManager
+        contexts={tournamentContexts}
+        activeContextId={activeContext?.id}
+        onSelectContext={handleSelectContext}
+        onAddContext={handleAddContext}
+        onRemoveContext={handleRemoveContext}
+      />
 
       <CompetitionSelectors
         competitions={competitions}
