@@ -13,15 +13,8 @@ Currently uses mock data in `src/data/mb_carnival.json`.
 1. Create a **public** GitHub repo, e.g. `hoops-hub-murray-bridge`
 2. In `vite.config.js`, set `base` to `'/hoops-hub-murray-bridge/'` (must match your repo name with leading/trailing slashes)
 3. Commit and push the project
-4. Build: `npm run build` (creates `dist/`)
-5. Publish `dist/` to Pages. Easiest: install `gh-pages` (`npm i -D gh-pages`) and add scripts to package.json:
-   ```json
-   "scripts": {
-     "predeploy": "npm run build",
-     "deploy": "gh-pages -d dist"
-   }
-   ```
-   Then run: `npm run deploy`
+4. Install dependencies (includes `gh-pages`): `npm install`
+5. Deploy to Pages: `npm run deploy` (builds the site and publishes `dist/` to the `gh-pages` branch)
 6. In GitHub, Settings → Pages → set branch to `gh-pages`. Your site will be at `https://<username>.github.io/<repo>/`
 
 ### B) Netlify
