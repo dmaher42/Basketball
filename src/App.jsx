@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import carnivalData from './data/mb_carnival.json'
 
 const ORG_KEY = '3416293c-d99b-47de-8866-74a6138f0740'
 const YEAR_REF_ID = 8
@@ -535,6 +536,13 @@ export default function App() {
     })
   }, [matches, selectedTeamId])
 
+  const playerStatsIndex = useMemo(() => buildPlayerStatsIndex(carnivalData), [])
+
+  const selectedTeamStats = useMemo(
+    () => getPlayerStatsForTeam(playerStatsIndex, selectedTeamId, selectedTeam),
+    [playerStatsIndex, selectedTeamId, selectedTeam]
+  )
+
   return (
     <div className="container" style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
       <header style={{ marginBottom: 24 }}>
@@ -605,17 +613,14 @@ export default function App() {
       )}
 
       {activeTab === 'player-stats' && (
-        <div className="card" style={{ padding: 16 }}>
-          <h2 style={{ marginTop: 0 }}>Player statistics</h2>
-          {selectedTeamId ? (
-            <p className="muted">
-              Player statistics for <strong>{selectedTeam?.name ?? selectedTeam?.teamName}</strong> are not available via the
-              public API yet. Check back later!
-            </p>
-          ) : (
-            <p className="muted">Select a team from the ladder or dropdown to view their player statistics when available.</p>
-          )}
-        </div>
+        <PlayerStatsView
+          selectedTeamId={selectedTeamId}
+          selectedTeam={selectedTeam}
+          selectedTeamStats={selectedTeamStats}
+          leaders={playerStatsIndex.leaders}
+          statsSourceName={carnivalData?.name}
+          hasStats={playerStatsIndex.hasData}
+        />
       )}
     </div>
   )
@@ -703,4 +708,280 @@ function normalizeRecentResults(ladderData) {
   }
 
   return []
+}
+
+function PlayerStatsView({
+  selectedTeamId,
+  selectedTeam,
+  selectedTeamStats,
+  leaders,
+  statsSourceName,
+  hasStats
+}) {
+  const hasSelectedTeam = Boolean(selectedTeamId)
+  const teamPlayers = selectedTeamStats?.players?.length ? [...selectedTeamStats.players] : []
+  teamPlayers.sort((a, b) => {
+    const ppgDiff = (b.ppg ?? 0) - (a.ppg ?? 0)
+    if (ppgDiff !== 0) return ppgDiff
+    const ptsDiff = (b.pts ?? 0) - (a.pts ?? 0)
+    if (ptsDiff !== 0) return ptsDiff
+    return (a.name || '').localeCompare(b.name || '')
+  })
+
+  const teamDisplayName =
+    selectedTeam?.name ??
+    selectedTeam?.teamName ??
+    selectedTeamStats?.team?.name ??
+    (hasSelectedTeam ? 'Selected team' : null)
+
+  const teamDivision =
+    selectedTeamStats?.team?.division ??
+    selectedTeamStats?.team?.divisionName ??
+    selectedTeam?.divisionName ??
+    selectedTeam?.poolName ??
+    null
+
+  const topPlayers = Array.isArray(leaders) ? leaders.slice(0, 10) : []
+
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <h2 style={{ marginTop: 0 }}>Player statistics</h2>
+
+      {hasSelectedTeam ? (
+        teamPlayers.length > 0 ? (
+          <div>
+            <div style={{ marginBottom: 12 }}>
+              <div className="title" style={{ fontSize: 18 }}>{teamDisplayName}</div>
+              {teamDivision && <div className="small muted">{teamDivision}</div>}
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }}>#</th>
+                  <th style={{ textAlign: 'left' }}>Player</th>
+                  <th>GP</th>
+                  <th>PTS</th>
+                  <th>PPG</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teamPlayers.map((player, index) => (
+                  <tr key={player.id ?? `${player.name}-${index}`}>
+                    <td>{index + 1}</td>
+                    <td style={{ textAlign: 'left' }}>{player.name ?? 'Unknown player'}</td>
+                    <td>{formatIntegerStat(player.gp)}</td>
+                    <td>{formatIntegerStat(player.pts)}</td>
+                    <td>{formatAverageStat(player.ppg)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div>
+            <p className="muted" style={{ marginBottom: topPlayers.length > 0 ? 16 : 0 }}>
+              Player statistics for <strong>{teamDisplayName}</strong> are not available yet. Select another team or check back
+              once stats have been recorded.
+            </p>
+            {topPlayers.length > 0 && (
+              <div>
+                <h3 style={{ marginBottom: 8, marginTop: 0 }}>Carnival leaders</h3>
+                <LeadersTable players={topPlayers} />
+              </div>
+            )}
+          </div>
+        )
+      ) : topPlayers.length > 0 ? (
+        <div>
+          <p className="muted">
+            Select a team from the ladder or dropdown to view detailed player numbers. In the meantime, here are the current
+            carnival leaders.
+          </p>
+          <LeadersTable players={topPlayers} />
+        </div>
+      ) : (
+        <p className="muted">Player statistics will appear here once data has been provided for this competition.</p>
+      )}
+
+      {hasStats && (
+        <p className="small muted" style={{ marginTop: 16 }}>
+          Data source: {statsSourceName || 'sample carnival data'}. Replace <code>src/data/mb_carnival.json</code> to update the
+          statistics with your own feed.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function LeadersTable({ players }) {
+  if (!players || players.length === 0) {
+    return null
+  }
+
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th style={{ width: 40 }}>#</th>
+          <th style={{ textAlign: 'left' }}>Player</th>
+          <th style={{ textAlign: 'left' }}>Team</th>
+          <th>GP</th>
+          <th>PTS</th>
+          <th>PPG</th>
+        </tr>
+      </thead>
+      <tbody>
+        {players.map((player, index) => (
+          <tr key={`${player.teamId}-${player.id ?? player.name ?? index}`}>
+            <td>{index + 1}</td>
+            <td style={{ textAlign: 'left' }}>{player.name ?? 'Unknown player'}</td>
+            <td style={{ textAlign: 'left' }}>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span>{player.teamName ?? 'Unknown team'}</span>
+                {player.division && <span className="small muted">{player.division}</span>}
+              </div>
+            </td>
+            <td>{formatIntegerStat(player.gp)}</td>
+            <td>{formatIntegerStat(player.pts)}</td>
+            <td>{formatAverageStat(player.ppg)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function buildPlayerStatsIndex(data) {
+  const empty = {
+    byId: new Map(),
+    byName: new Map(),
+    leaders: [],
+    hasData: false
+  }
+
+  if (!data || typeof data !== 'object') {
+    return empty
+  }
+
+  const playerStats = data.playerStats && typeof data.playerStats === 'object' ? data.playerStats : null
+  if (!playerStats) {
+    return empty
+  }
+
+  const teams = Array.isArray(data.teams) ? data.teams : []
+  const teamMetaById = new Map()
+  for (const team of teams) {
+    const identifier = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.name
+    if (identifier != null) {
+      teamMetaById.set(String(identifier), team)
+    }
+  }
+
+  for (const [teamKey, players] of Object.entries(playerStats)) {
+    const teamId = String(teamKey)
+    const normalizedPlayers = Array.isArray(players)
+      ? players.map((player) => ({
+          ...player,
+          gp: toNumber(player.gp),
+          pts: toNumber(player.pts),
+          ppg: toNumber(player.ppg)
+        }))
+      : []
+
+    if (normalizedPlayers.length > 0) {
+      empty.hasData = true
+    }
+
+    const teamMeta = teamMetaById.get(teamId) || null
+    const entry = { teamId, team: teamMeta, players: normalizedPlayers }
+
+    empty.byId.set(teamId, entry)
+
+    const normalizedTeamName = normalizeTeamName(teamMeta?.name)
+    if (normalizedTeamName) {
+      empty.byName.set(normalizedTeamName, entry)
+    }
+
+    for (const player of normalizedPlayers) {
+      empty.leaders.push({
+        ...player,
+        teamId,
+        teamName: teamMeta?.name ?? teamId,
+        division: teamMeta?.division ?? teamMeta?.divisionName ?? null
+      })
+    }
+  }
+
+  empty.leaders.sort((a, b) => {
+    const ppgDiff = (b.ppg ?? 0) - (a.ppg ?? 0)
+    if (ppgDiff !== 0) return ppgDiff
+    const ptsDiff = (b.pts ?? 0) - (a.pts ?? 0)
+    if (ptsDiff !== 0) return ptsDiff
+    return (a.name || '').localeCompare(b.name || '')
+  })
+
+  return empty
+}
+
+function getPlayerStatsForTeam(index, teamId, selectedTeam) {
+  if (!index) {
+    return null
+  }
+
+  const idKey = teamId != null ? String(teamId) : null
+  if (idKey && index.byId.has(idKey)) {
+    return index.byId.get(idKey)
+  }
+
+  const candidateNames = [
+    selectedTeam?.name,
+    selectedTeam?.teamName,
+    selectedTeam?.team?.name,
+    selectedTeam?.team?.teamName
+  ]
+
+  for (const name of candidateNames) {
+    const normalized = normalizeTeamName(name)
+    if (normalized && index.byName.has(normalized)) {
+      return index.byName.get(normalized)
+    }
+  }
+
+  return null
+}
+
+function normalizeTeamName(name) {
+  if (typeof name !== 'string') {
+    return ''
+  }
+  return name
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+function toNumber(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function formatIntegerStat(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toLocaleString()
+  }
+  return '–'
+}
+
+function formatAverageStat(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toFixed(1)
+  }
+  return '–'
 }
