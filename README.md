@@ -35,6 +35,22 @@ Currently uses mock data in `src/data/mb_carnival.json`.
   ```
 - Keep the file shape the same: `{ id, name, org, season, teams[], ladder[], fixtures[], playerStats{} }`
 
+## Add tournaments by organisation key
+The app can look up live BasketballConnect data for any organisation/year once you know their identifiers.
+
+1. Open the app and scroll to the **Tournaments** card at the top of the page.
+2. Paste the BasketballConnect **Organisation key** into the “Organisation key” field.
+3. Enter the season’s **Year reference ID** (the same `yearRefId` value BasketballConnect uses in its URLs).
+4. Click **Search**. The app calls the BasketballConnect competitions API to confirm the combination exists.
+5. When results are found, press **Add “Tournament name”** to save it. The tournament becomes the active context immediately and persists in your browser’s local storage so it’s ready next time you load the app.
+6. Switch between saved tournaments using the “Active tournament” dropdown, or remove a saved tournament with **Remove this tournament**.
+
+### Find a BasketballConnect organisation key
+1. Sign in to [BasketballConnect](https://websites.mygameday.app/comp) and open any page that belongs to the organisation you need.
+2. Look at the address bar. Organisation pages include `organisationKey=<value>` (e.g. `.../organisationKey=a1b2c3`); copy that value.
+3. If you are browsing via the admin interface, you can also copy the value shown beside **Organisation key** in the Organisation Details panel. It matches the URL parameter.
+4. Paste the copied key into the **Organisation key** field in the Hoops Hub Tournaments card and combine it with the correct BasketballConnect **Year reference ID**.
+
 ## Notes
 - If using GitHub Pages, ensure `vite.config.js` `base` matches the repo name exactly.
 - You can change the initial team by editing `selectedTeamId` in `src/App.jsx`.
