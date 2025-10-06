@@ -5,6 +5,7 @@ const YEAR_REF_ID = 8
 const API_BASE = 'https://api-basketball.squadi.com/livescores'
 const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
 const IGNORE_STATUSES = encodeURIComponent(JSON.stringify([1]))
+const SPORT_REF_ID = 2
 
 const TABS = [
   { id: 'ladder', label: 'Ladder' },
@@ -280,6 +281,8 @@ export default function App() {
   const [matchesLoading, setMatchesLoading] = useState(false)
   const [matchesError, setMatchesError] = useState(null)
 
+  const [playerStatsState, setPlayerStatsState] = useState({ entries: [], loading: false, error: null })
+
   const [selectedTeamId, setSelectedTeamId] = useState(null)
 
   useEffect(() => {
@@ -323,6 +326,11 @@ export default function App() {
   const selectedCompetition = useMemo(
     () => competitions.find((competition) => competition.id === selectedCompetitionId) || null,
     [competitions, selectedCompetitionId]
+  )
+
+  const selectedDivision = useMemo(
+    () => divisions.find((division) => division.id === selectedDivisionId) || null,
+    [divisions, selectedDivisionId]
   )
 
   useEffect(() => {
@@ -376,6 +384,7 @@ export default function App() {
     if (!selectedCompetition || !selectedDivisionId) {
       setLadderState({ rows: [], lastResults: [], nextResults: [] })
       setMatches([])
+      setPlayerStatsState({ entries: [], loading: false, error: null })
       return
     }
 
@@ -488,6 +497,77 @@ export default function App() {
     }
   }, [selectedCompetition, selectedDivisionId])
 
+  useEffect(() => {
+    if (!selectedCompetition || !selectedDivisionId) {
+      setPlayerStatsState({ entries: [], loading: false, error: null })
+      return
+    }
+
+    let cancelled = false
+    setPlayerStatsState({ entries: [], loading: true, error: null })
+
+    async function fetchPlayerStats() {
+      const aggregatedEntries = []
+      let offset = 0
+      const limit = 200
+
+      try {
+        while (!cancelled) {
+          const params = new URLSearchParams({
+            competitionId: String(selectedCompetition.id),
+            divisionId: String(selectedDivisionId),
+            aggregate: 'ALL',
+            sportRefId: String(SPORT_REF_ID),
+            limit: String(limit),
+            offset: String(offset)
+          })
+
+          const response = await fetch(`${API_BASE}/stats/public/v2/scoringByPlayer?${params.toString()}`)
+          if (cancelled) {
+            return
+          }
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`)
+          }
+
+          let data
+          try {
+            data = await response.json()
+          } catch (parseError) {
+            throw new Error('Unexpected player statistics response format')
+          }
+
+          const pageEntries = Array.isArray(data?.result) ? data.result : []
+          aggregatedEntries.push(...pageEntries)
+
+          const nextPageValue = Number(data?.page?.nextPage ?? 0)
+          if (!Number.isFinite(nextPageValue) || nextPageValue <= offset || pageEntries.length === 0) {
+            break
+          }
+          offset = nextPageValue
+        }
+
+        if (!cancelled) {
+          setPlayerStatsState({ entries: aggregatedEntries, loading: false, error: null })
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPlayerStatsState({
+            entries: [],
+            loading: false,
+            error: error?.message || 'Failed to load player statistics'
+          })
+        }
+      }
+    }
+
+    fetchPlayerStats()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedCompetition, selectedDivisionId])
+
   const ladderRows = useMemo(() => {
     const lastResultsMap = new Map()
     for (const item of ladderState.lastResults || []) {
@@ -534,6 +614,16 @@ export default function App() {
       return team1Id === String(selectedTeamId) || team2Id === String(selectedTeamId)
     })
   }, [matches, selectedTeamId])
+
+  const playerStatsIndex = useMemo(
+    () => buildPlayerStatsIndex(playerStatsState.entries),
+    [playerStatsState.entries]
+  )
+
+  const selectedTeamStats = useMemo(
+    () => getPlayerStatsForTeam(playerStatsIndex, selectedTeamId, selectedTeam),
+    [playerStatsIndex, selectedTeamId, selectedTeam]
+  )
 
   return (
     <div className="container" style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
@@ -605,17 +695,17 @@ export default function App() {
       )}
 
       {activeTab === 'player-stats' && (
-        <div className="card" style={{ padding: 16 }}>
-          <h2 style={{ marginTop: 0 }}>Player statistics</h2>
-          {selectedTeamId ? (
-            <p className="muted">
-              Player statistics for <strong>{selectedTeam?.name ?? selectedTeam?.teamName}</strong> are not available via the
-              public API yet. Check back later!
-            </p>
-          ) : (
-            <p className="muted">Select a team from the ladder or dropdown to view their player statistics when available.</p>
-          )}
-        </div>
+        <PlayerStatsView
+          loading={playerStatsState.loading}
+          error={playerStatsState.error}
+          selectedTeamId={selectedTeamId}
+          selectedTeam={selectedTeam}
+          selectedTeamStats={selectedTeamStats}
+          leaders={playerStatsIndex.leaders}
+          hasStats={playerStatsIndex.hasData}
+          competitionName={selectedCompetition?.longName || selectedCompetition?.name}
+          divisionName={selectedDivision?.name ?? selectedDivision?.divisionName}
+        />
       )}
     </div>
   )
@@ -703,4 +793,317 @@ function normalizeRecentResults(ladderData) {
   }
 
   return []
+}
+
+function PlayerStatsView({
+  loading,
+  error,
+  selectedTeamId,
+  selectedTeam,
+  selectedTeamStats,
+  leaders,
+  hasStats,
+  competitionName,
+  divisionName
+}) {
+  if (error) {
+    return <ErrorCard message={error} />
+  }
+
+  const hasSelectedTeam = Boolean(selectedTeamId)
+  const teamPlayers = selectedTeamStats?.players?.length ? [...selectedTeamStats.players] : []
+  teamPlayers.sort((a, b) => {
+    const ppgDiff = (b.ppg ?? 0) - (a.ppg ?? 0)
+    if (ppgDiff !== 0) return ppgDiff
+    const ptsDiff = (b.pts ?? 0) - (a.pts ?? 0)
+    if (ptsDiff !== 0) return ptsDiff
+    return (a.name || '').localeCompare(b.name || '')
+  })
+
+  const teamDisplayName =
+    selectedTeam?.name ??
+    selectedTeam?.teamName ??
+    selectedTeamStats?.team?.name ??
+    (hasSelectedTeam ? 'Selected team' : null)
+
+  const teamDivision =
+    selectedTeamStats?.team?.division ??
+    selectedTeamStats?.team?.divisionName ??
+    selectedTeam?.divisionName ??
+    selectedTeam?.poolName ??
+    null
+
+  const topPlayers = Array.isArray(leaders) ? leaders.slice(0, 10) : []
+
+  const contextLine = [divisionName, competitionName].filter(Boolean).join(' · ')
+
+  if (loading) {
+    return (
+      <div className="card" style={{ padding: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Player statistics</h2>
+        {contextLine && <p className="small muted" style={{ marginBottom: 16 }}>{contextLine}</p>}
+        <LoadingMessage text="Loading player statistics…" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="card" style={{ padding: 16 }}>
+      <h2 style={{ marginTop: 0 }}>Player statistics</h2>
+      {contextLine && <p className="small muted" style={{ marginBottom: 16 }}>{contextLine}</p>}
+
+      {hasSelectedTeam ? (
+        teamPlayers.length > 0 ? (
+          <div>
+            <div style={{ marginBottom: 12 }}>
+              <div className="title" style={{ fontSize: 18 }}>{teamDisplayName}</div>
+              {teamDivision && <div className="small muted">{teamDivision}</div>}
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }}>#</th>
+                  <th style={{ textAlign: 'left' }}>Player</th>
+                  <th>GP</th>
+                  <th>PTS</th>
+                  <th>PPG</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teamPlayers.map((player, index) => (
+                  <tr key={player.id ?? `${player.name}-${index}`}>
+                    <td>{index + 1}</td>
+                    <td style={{ textAlign: 'left' }}>{player.name ?? 'Unknown player'}</td>
+                    <td>{formatIntegerStat(player.gp)}</td>
+                    <td>{formatIntegerStat(player.pts)}</td>
+                    <td>{formatAverageStat(player.ppg)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div>
+            <p className="muted" style={{ marginBottom: topPlayers.length > 0 ? 16 : 0 }}>
+              Player statistics for <strong>{teamDisplayName}</strong> are not available yet. Select another team or check back
+              once stats have been recorded.
+            </p>
+            {topPlayers.length > 0 && (
+              <div>
+                <h3 style={{ marginBottom: 8, marginTop: 0 }}>Division leaders</h3>
+                <LeadersTable players={topPlayers} />
+              </div>
+            )}
+          </div>
+        )
+      ) : topPlayers.length > 0 ? (
+        <div>
+          <p className="muted">
+            Select a team from the ladder or dropdown to view detailed player numbers. In the meantime, here are the current division
+            leaders.
+          </p>
+          <LeadersTable players={topPlayers} />
+        </div>
+      ) : (
+        <p className="muted">Player statistics will appear here once data has been provided for this competition.</p>
+      )}
+
+      {hasStats && (
+        <p className="small muted" style={{ marginTop: 16 }}>
+          Data source: BasketballConnect live scoring feed.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function LeadersTable({ players }) {
+  if (!players || players.length === 0) {
+    return null
+  }
+
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th style={{ width: 40 }}>#</th>
+          <th style={{ textAlign: 'left' }}>Player</th>
+          <th style={{ textAlign: 'left' }}>Team</th>
+          <th>GP</th>
+          <th>PTS</th>
+          <th>PPG</th>
+        </tr>
+      </thead>
+      <tbody>
+        {players.map((player, index) => (
+          <tr key={`${player.teamId}-${player.id ?? player.name ?? index}`}>
+            <td>{index + 1}</td>
+            <td style={{ textAlign: 'left' }}>{player.name ?? 'Unknown player'}</td>
+            <td style={{ textAlign: 'left' }}>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span>{player.teamName ?? 'Unknown team'}</span>
+                {player.division && <span className="small muted">{player.division}</span>}
+              </div>
+            </td>
+            <td>{formatIntegerStat(player.gp)}</td>
+            <td>{formatIntegerStat(player.pts)}</td>
+            <td>{formatAverageStat(player.ppg)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function buildPlayerStatsIndex(entries) {
+  const empty = {
+    byId: new Map(),
+    byName: new Map(),
+    leaders: [],
+    hasData: false
+  }
+
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return empty
+  }
+
+  for (const record of entries) {
+    if (!record) {
+      continue
+    }
+
+    const rawTeamId =
+      record.actualPlayerTeamId ??
+      record.teamId ??
+      record.teamUniqueKey ??
+      (record.teamName ? normalizeTeamName(record.teamName) : null)
+    if (rawTeamId == null) {
+      continue
+    }
+
+    const teamId = String(rawTeamId)
+    const teamNameCandidates = [record.teamName, record.team2Name, record.team1Name, teamId]
+    const teamName = teamNameCandidates.find((value) => typeof value === 'string' && value.trim() !== '')?.trim() ?? teamId
+    const division = record.divisionName ?? record.division ?? null
+
+    let teamEntry = empty.byId.get(teamId)
+    if (!teamEntry) {
+      const teamMeta = { id: teamId, name: teamName, division }
+      teamEntry = { teamId, team: teamMeta, players: [] }
+      empty.byId.set(teamId, teamEntry)
+      const normalizedTeamName = normalizeTeamName(teamName)
+      if (normalizedTeamName) {
+        empty.byName.set(normalizedTeamName, teamEntry)
+      }
+    } else if (division && !teamEntry.team?.division) {
+      teamEntry.team = { ...teamEntry.team, division }
+    }
+
+    const playerNameParts = [record.firstName, record.lastName].filter(Boolean)
+    let playerName = playerNameParts.join(' ').trim()
+    if (!playerName) {
+      if (record.shirt) {
+        playerName = `#${record.shirt}`
+      } else if (record.playerId != null) {
+        playerName = `Player ${record.playerId}`
+      } else {
+        playerName = 'Unknown player'
+      }
+    }
+
+    const playerId = record.playerId ?? record.userId ?? `${teamId}-${playerName}`
+    const player = {
+      id: playerId,
+      name: playerName,
+      gp: toNumber(record.totalMatches ?? record.matchesPlayed ?? record.matches),
+      pts: toNumber(record.totalPts ?? record.PTS ?? record.totalPoints),
+      ppg: toNumber(record.avgPts ?? record.avgPoints ?? record.pointsPerGame)
+    }
+
+    teamEntry.players.push(player)
+
+    empty.leaders.push({
+      ...player,
+      teamId,
+      teamName: teamEntry.team?.name ?? teamName ?? teamId,
+      division: teamEntry.team?.division ?? division ?? null
+    })
+  }
+
+  if (empty.leaders.length > 0) {
+    empty.hasData = true
+  }
+
+  empty.leaders.sort((a, b) => {
+    const ppgDiff = (b.ppg ?? 0) - (a.ppg ?? 0)
+    if (ppgDiff !== 0) return ppgDiff
+    const ptsDiff = (b.pts ?? 0) - (a.pts ?? 0)
+    if (ptsDiff !== 0) return ptsDiff
+    return (a.name || '').localeCompare(b.name || '')
+  })
+
+  return empty
+}
+
+function getPlayerStatsForTeam(index, teamId, selectedTeam) {
+  if (!index) {
+    return null
+  }
+
+  const idKey = teamId != null ? String(teamId) : null
+  if (idKey && index.byId.has(idKey)) {
+    return index.byId.get(idKey)
+  }
+
+  const candidateNames = [
+    selectedTeam?.name,
+    selectedTeam?.teamName,
+    selectedTeam?.team?.name,
+    selectedTeam?.team?.teamName
+  ]
+
+  for (const name of candidateNames) {
+    const normalized = normalizeTeamName(name)
+    if (normalized && index.byName.has(normalized)) {
+      return index.byName.get(normalized)
+    }
+  }
+
+  return null
+}
+
+function normalizeTeamName(name) {
+  if (typeof name !== 'string') {
+    return ''
+  }
+  return name
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+function toNumber(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function formatIntegerStat(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toLocaleString()
+  }
+  return '–'
+}
+
+function formatAverageStat(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toFixed(1)
+  }
+  return '–'
 }
