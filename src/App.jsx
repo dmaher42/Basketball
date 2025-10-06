@@ -71,7 +71,15 @@ function normaliseLadderEntry(entry) {
 function extractLadderArray(raw) {
   if (!raw || typeof raw !== 'object') return []
 
-  if (Array.isArray(raw)) return raw
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (item && typeof item === 'object') {
+        const nested = extractLadderArray(item)
+        if (nested.length) return nested
+      }
+    }
+    return raw
+  }
 
   const possibleKeys = [
     'ladder',
@@ -359,13 +367,16 @@ export default function App() {
                 </thead>
                 <tbody>
                   {ladderEntries.map((entry, index) => {
-                    const teamId = entry.teamId ?? null;
-                    const isSelected = selectedTeamId === teamId;
+                    const teamId = entry.teamId ?? null
+                    const isSelected = selectedTeamId === teamId
                     return (
                       <tr
-                        key={teamId ? teamId : `${entry.teamName}-${index}`}
-                        onClick={() => setSelectedTeamId(prev => prev === teamId ? null : teamId)}
+                        key={teamId ?? `${entry.teamName}-${index}`}
+                        onClick={() =>
+                          setSelectedTeamId(prev => (prev === teamId ? null : teamId))
+                        }
                         style={{ cursor: teamId ? 'pointer' : 'default', backgroundColor: isSelected ? '#fff7cc' : undefined }}
+                      >
                         <td style={{ textAlign: 'left' }}>{entry.teamName}</td>
                         <td style={{ textAlign: 'center' }}>{entry.played ?? '–'}</td>
                         <td style={{ textAlign: 'center' }}>{entry.wins ?? '–'}</td>
