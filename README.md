@@ -50,6 +50,16 @@ The app can look up live BasketballConnect data for any organisation/year once y
 - Tournaments you add are written to `localStorage` in your browser under the keys `bc:tournamentContexts` (the full list) and `bc:activeTournamentContextId` (the currently selected one).
 - Because they are stored locally, each browser/device keeps its own list. Clearing site data or using a new browser profile resets the list back to the default Murray Bridge Carnival context.
 
+### Sync tournaments across devices
+
+The Tournaments card exposes a share link and a compact “share code” that bundle your saved tournaments (organisation keys, year reference IDs, and display names) along with the currently active tournament.
+
+1. Open the **Sync across devices** section in the Tournaments card.
+2. Press **Copy** beside the share link or the share code and send it to another device.
+3. On the other device, paste the share code into the **Import a share code** box and click **Import**. Any new tournaments are added automatically and, if the active tournament exists in the code, it becomes the active context immediately.
+
+Share links simply append the encoded data as a `?tournaments=` query parameter. You can bookmark or distribute the link: opening it on any device imports the tournaments once and then removes the parameter from the URL.
+
 ### Find a BasketballConnect organisation key
 1. Sign in to [BasketballConnect](https://websites.mygameday.app/comp) and open any page that belongs to the organisation you need.
 2. Look at the address bar. Organisation pages include `organisationKey=<value>` (e.g. `.../organisationKey=a1b2c3`); copy that value.

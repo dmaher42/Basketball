@@ -16,6 +16,9 @@ const DEFAULT_CONTEXT = {
   yearRefId: DEFAULT_YEAR_REF_ID
 }
 
+const SHARE_QUERY_PARAM = 'tournaments'
+const SHARE_PAYLOAD_VERSION = 1
+
 const TABS = [
   { id: 'ladder', label: 'Ladder' },
   { id: 'fixtures', label: 'Fixtures' },
@@ -63,6 +66,116 @@ function sanitizeContexts(contexts) {
   )
 
   return [DEFAULT_CONTEXT, ...otherContexts]
+}
+
+function encodeSharePayload(payload) {
+  try {
+    const json = JSON.stringify(payload)
+    if (typeof window !== 'undefined' && typeof window.btoa === 'function') {
+      return window.btoa(
+        encodeURIComponent(json).replace(/%([0-9A-F]{2})/g, (_, hex) =>
+          String.fromCharCode(Number.parseInt(hex, 16))
+        )
+      )
+    }
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(json, 'utf-8').toString('base64')
+    }
+  } catch (error) {
+    console.warn('Failed to encode share payload', error)
+  }
+  return ''
+}
+
+function decodeSharePayload(code) {
+  if (!code) return null
+  try {
+    if (typeof window !== 'undefined' && typeof window.atob === 'function') {
+      const binary = window.atob(code)
+      const percentEncoded = Array.from(binary)
+        .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+        .join('')
+      const json = decodeURIComponent(percentEncoded)
+      return JSON.parse(json)
+    }
+    if (typeof Buffer !== 'undefined') {
+      const json = Buffer.from(code, 'base64').toString('utf-8')
+      return JSON.parse(json)
+    }
+  } catch (error) {
+    console.warn('Failed to decode share payload', error)
+  }
+  return null
+}
+
+function createShareArtifacts(contexts, activeContextId) {
+  const nonDefaultContexts = Array.isArray(contexts)
+    ? contexts.filter((context) => context.id !== DEFAULT_CONTEXT.id)
+    : []
+  const activeContext = Array.isArray(contexts)
+    ? contexts.find((context) => context.id === activeContextId) || DEFAULT_CONTEXT
+    : DEFAULT_CONTEXT
+
+  const payload = {
+    v: SHARE_PAYLOAD_VERSION,
+    contexts: nonDefaultContexts.map((context) => ({
+      label: context.label,
+      orgKey: context.orgKey,
+      yearRefId: context.yearRefId
+    })),
+    active: activeContext
+      ? {
+          orgKey: activeContext.orgKey,
+          yearRefId: activeContext.yearRefId
+        }
+      : null
+  }
+
+  const code = encodeSharePayload(payload)
+  const baseUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}`
+      : ''
+  const url = code ? `${baseUrl}?${SHARE_QUERY_PARAM}=${encodeURIComponent(code)}` : ''
+
+  return { code, url }
+}
+
+function parseShareCode(code) {
+  const trimmed = typeof code === 'string' ? code.trim() : ''
+  if (!trimmed) return null
+  const payload = decodeSharePayload(trimmed)
+  if (!payload || payload.v !== SHARE_PAYLOAD_VERSION || !Array.isArray(payload.contexts)) {
+    return null
+  }
+  const contexts = payload.contexts
+    .map((context) => {
+      if (!context || typeof context !== 'object') return null
+      const orgKey = typeof context.orgKey === 'string' ? context.orgKey.trim() : ''
+      const yearRefId = Number(context.yearRefId)
+      if (!orgKey || Number.isNaN(yearRefId)) return null
+      const label = typeof context.label === 'string' && context.label.trim()
+        ? context.label.trim()
+        : `${orgKey.slice(0, 8)}… (${yearRefId})`
+      return { label, orgKey, yearRefId }
+    })
+    .filter(Boolean)
+
+  const active = payload.active && typeof payload.active === 'object'
+    ? {
+        orgKey:
+          typeof payload.active.orgKey === 'string'
+            ? payload.active.orgKey.trim()
+            : '',
+        yearRefId: Number(payload.active.yearRefId)
+      }
+    : null
+
+  const validActive = active && active.orgKey && !Number.isNaN(active.yearRefId)
+    ? active
+    : null
+
+  return { contexts, active: validActive, raw: trimmed }
 }
 
 function loadStoredContexts() {
@@ -178,7 +291,10 @@ function TournamentManager({
   activeContextId,
   onSelectContext,
   onAddContext,
-  onRemoveContext
+  onRemoveContext,
+  shareUrl,
+  shareCode,
+  onImportShareCode
 }) {
   const [label, setLabel] = useState('')
   const [orgKey, setOrgKey] = useState('')
@@ -186,6 +302,12 @@ function TournamentManager({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [preview, setPreview] = useState(null)
+  const [shareMessage, setShareMessage] = useState(null)
+  const [shareError, setShareError] = useState(null)
+  const [importCode, setImportCode] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [importMessage, setImportMessage] = useState(null)
+  const [importError, setImportError] = useState(null)
 
   const orderedContexts = contexts
 
@@ -249,6 +371,97 @@ function TournamentManager({
   }
 
   const activeContext = contexts.find((context) => context.id === activeContextId)
+
+  async function copyToClipboard(text, onSuccess, onFailure) {
+    if (!text) {
+      onFailure?.('Nothing to copy yet. Add a tournament first.')
+      return
+    }
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        onSuccess?.()
+        return
+      }
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'absolute'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      onSuccess?.()
+    } catch (copyError) {
+      console.warn('Failed to copy text', copyError)
+      onFailure?.('Copy failed. Select the text and copy it manually.')
+    }
+  }
+
+  function handleCopyLink() {
+    setShareError(null)
+    copyToClipboard(
+      shareUrl,
+      () => setShareMessage('Share link copied to clipboard.'),
+      (failureMessage) => {
+        setShareMessage(null)
+        setShareError(failureMessage)
+      }
+    )
+  }
+
+  function handleCopyCode() {
+    setShareError(null)
+    copyToClipboard(
+      shareCode,
+      () => setShareMessage('Share code copied to clipboard.'),
+      (failureMessage) => {
+        setShareMessage(null)
+        setShareError(failureMessage)
+      }
+    )
+  }
+
+  async function handleImportCode() {
+    const trimmed = importCode.trim()
+    if (!trimmed) {
+      setImportMessage(null)
+      setImportError('Paste a code to import tournaments from another device.')
+      return
+    }
+    setImporting(true)
+    setImportMessage(null)
+    setImportError(null)
+    try {
+      const result = await Promise.resolve(onImportShareCode(trimmed))
+      if (!result || result.success === false) {
+        setImportError(result?.error || 'Import failed. Check the code and try again.')
+        setImportMessage(null)
+      } else {
+        const addedCount = Number(result.addedCount) || 0
+        const replacedCount = Number(result.replacedCount) || 0
+        const parts = []
+        if (addedCount > 0) {
+          parts.push(`${addedCount} new tournament${addedCount === 1 ? '' : 's'} added`)
+        }
+        if (replacedCount > 0) {
+          parts.push('existing entries refreshed')
+        }
+        if (parts.length === 0) {
+          parts.push('Your saved tournaments are already up to date on this device.')
+        }
+        if (result.activeMatched) {
+          parts.push('Active tournament updated to match the shared code.')
+        }
+        setImportMessage(parts.join('. '))
+        setImportError(null)
+        setImportCode('')
+      }
+    } finally {
+      setImporting(false)
+    }
+  }
 
   return (
     <div className="card" style={{ padding: 16, marginBottom: 24 }}>
@@ -344,6 +557,80 @@ function TournamentManager({
           </div>
         )}
       </form>
+
+      <div style={{ marginTop: 24 }}>
+        <h3 style={{ margin: '16px 0 8px' }}>Sync across devices</h3>
+        <p className="field-help" style={{ marginTop: 0 }}>
+          Share the link or code below with another browser to copy your saved tournaments.
+        </p>
+
+        <label className="field-label" htmlFor="tournament-share-link">
+          Share link
+        </label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            id="tournament-share-link"
+            className="field-input"
+            type="text"
+            value={shareUrl || ''}
+            onFocus={(event) => event.target.select()}
+            readOnly
+          />
+          <button type="button" className="btn" onClick={handleCopyLink}>
+            Copy
+          </button>
+        </div>
+
+        <label className="field-label" htmlFor="tournament-share-code" style={{ marginTop: 12 }}>
+          Share code
+        </label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <textarea
+            id="tournament-share-code"
+            className="field-input"
+            style={{ resize: 'vertical', minHeight: 64 }}
+            value={shareCode || ''}
+            onFocus={(event) => event.target.select()}
+            readOnly
+          />
+          <button type="button" className="btn" onClick={handleCopyCode}>
+            Copy
+          </button>
+        </div>
+        {shareMessage && (
+          <p className="field-help" style={{ color: '#0a6847' }}>{shareMessage}</p>
+        )}
+        {shareError && (
+          <p className="field-help" style={{ color: '#c00' }}>{shareError}</p>
+        )}
+
+        <label className="field-label" htmlFor="tournament-import-code" style={{ marginTop: 16 }}>
+          Import a share code
+        </label>
+        <textarea
+          id="tournament-import-code"
+          className="field-input"
+          style={{ resize: 'vertical', minHeight: 64 }}
+          value={importCode}
+          onChange={(event) => setImportCode(event.target.value)}
+          placeholder="Paste a code from another device and click Import"
+        />
+        <button
+          type="button"
+          className="btn btn-dark"
+          style={{ marginTop: 12 }}
+          onClick={handleImportCode}
+          disabled={importing}
+        >
+          {importing ? 'Importing…' : 'Import'}
+        </button>
+        {importMessage && (
+          <p className="field-help" style={{ color: '#0a6847' }}>{importMessage}</p>
+        )}
+        {importError && (
+          <p className="field-help" style={{ color: '#c00' }}>{importError}</p>
+        )}
+      </div>
     </div>
   )
 }
@@ -561,6 +848,11 @@ export default function App() {
     [tournamentContexts, activeContextId]
   )
 
+  const shareArtifacts = useMemo(
+    () => createShareArtifacts(tournamentContexts, activeContextId),
+    [tournamentContexts, activeContextId]
+  )
+
   const organisationKey = activeContext?.orgKey ?? DEFAULT_ORG_KEY
   const yearRefId = activeContext?.yearRefId ?? DEFAULT_YEAR_REF_ID
 
@@ -616,6 +908,116 @@ export default function App() {
       sanitizeContexts(previous.filter((context) => context.id !== contextId))
     )
   }
+
+  function handleImportShareCode(code, { setActiveFromPayload = true } = {}) {
+    const parsed = parseShareCode(code)
+    if (!parsed) {
+      return { success: false, error: 'That code could not be read. Make sure it was copied fully.' }
+    }
+
+    const contextsToAdd = parsed.contexts.map((context) => {
+      const trimmedOrgKey = context.orgKey.trim()
+      const numericYear = Number(context.yearRefId)
+      const normalizedLabel = context.label && context.label.trim()
+        ? context.label.trim()
+        : `${trimmedOrgKey.slice(0, 8)}… (${numericYear})`
+      return {
+        id: generateContextId(),
+        label: normalizedLabel,
+        orgKey: trimmedOrgKey,
+        yearRefId: numericYear
+      }
+    })
+
+    const validContextsToAdd = contextsToAdd.filter(
+      (context) => context.orgKey && !Number.isNaN(context.yearRefId)
+    )
+
+    const hasContexts = validContextsToAdd.length > 0
+    const activeKey = parsed.active
+      ? `${parsed.active.orgKey}-${Number(parsed.active.yearRefId)}`
+      : null
+
+    if (!hasContexts && !activeKey) {
+      return { success: false, error: 'That code did not include any tournaments.' }
+    }
+
+    const existingKeys = new Set(
+      tournamentContexts.map((context) => `${context.orgKey}-${context.yearRefId}`)
+    )
+
+    let addedCount = 0
+    for (const context of validContextsToAdd) {
+      const key = `${context.orgKey}-${context.yearRefId}`
+      if (!existingKeys.has(key)) {
+        addedCount += 1
+        existingKeys.add(key)
+      }
+    }
+
+    let activeMatched = false
+
+    if (hasContexts) {
+      setTournamentContexts((previous) => {
+        const merged = sanitizeContexts([...previous, ...validContextsToAdd])
+        if (setActiveFromPayload && activeKey) {
+          const target = merged.find(
+            (context) => `${context.orgKey}-${context.yearRefId}` === activeKey
+          )
+          if (target) {
+            activeMatched = true
+            setActiveContextId(target.id)
+          }
+        }
+        return merged
+      })
+    } else if (setActiveFromPayload && activeKey) {
+      const currentMatch = tournamentContexts.find(
+        (context) => `${context.orgKey}-${context.yearRefId}` === activeKey
+      )
+      if (currentMatch) {
+        activeMatched = true
+        setActiveContextId(currentMatch.id)
+      }
+    }
+
+    if (setActiveFromPayload && activeKey && !activeMatched) {
+      setTournamentContexts((previous) => {
+        const merged = sanitizeContexts(previous)
+        const target = merged.find(
+          (context) => `${context.orgKey}-${context.yearRefId}` === activeKey
+        )
+        if (target) {
+          activeMatched = true
+          setActiveContextId(target.id)
+        }
+        return merged
+      })
+    }
+
+    return {
+      success: true,
+      addedCount,
+      replacedCount: validContextsToAdd.length - addedCount,
+      activeMatched
+    }
+  }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get(SHARE_QUERY_PARAM)
+    if (!code) return
+    const result = handleImportShareCode(code, { setActiveFromPayload: true })
+    if (!result?.success) {
+      console.warn('Failed to import tournaments from share link', result?.error)
+    }
+    params.delete(SHARE_QUERY_PARAM)
+    const search = params.toString()
+    const newUrl = `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash || ''}`
+    window.history.replaceState(null, '', newUrl)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     setCompetitions([])
@@ -900,6 +1302,9 @@ export default function App() {
         onSelectContext={handleSelectContext}
         onAddContext={handleAddContext}
         onRemoveContext={handleRemoveContext}
+        shareUrl={shareArtifacts.url}
+        shareCode={shareArtifacts.code}
+        onImportShareCode={handleImportShareCode}
       />
 
       <CompetitionSelectors
