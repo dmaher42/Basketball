@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 const ORG_KEY = '3416293c-d99b-47de-8866-74a6138f0740'
 const YEAR_REF_ID = 8
 const API_BASE = 'https://api-basketball.squadi.com/livescores'
+const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
 const IGNORE_STATUSES = encodeURIComponent(JSON.stringify([1]))
 
 const TABS = [
@@ -35,8 +36,10 @@ function formatDateTime(isoString) {
 
 function MatchCard({ match, selectedTeamId }) {
   const { date, time } = formatDateTime(match.startTime || match.originalStartTime)
-  const team1Selected = selectedTeamId != null && match.team1?.id === selectedTeamId
-  const team2Selected = selectedTeamId != null && match.team2?.id === selectedTeamId
+  const team1Selected =
+    selectedTeamId != null && match.team1?.id != null && String(match.team1.id) === String(selectedTeamId)
+  const team2Selected =
+    selectedTeamId != null && match.team2?.id != null && String(match.team2.id) === String(selectedTeamId)
   const score1 = typeof match.team1Score === 'number' ? match.team1Score : '–'
   const score2 = typeof match.team2Score === 'number' ? match.team2Score : '–'
   const highlightStyle = {
@@ -183,27 +186,28 @@ function LadderTable({
         </thead>
         <tbody>
           {ladderRows.map((team) => {
-            const isSelected = selectedTeamId === team.id
+            const teamId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
+            const isSelected = selectedTeamId != null && String(selectedTeamId) === String(teamId)
             return (
               <tr
-                key={team.id}
+                key={teamId ?? team.name}
                 className={isSelected ? 'highlight' : undefined}
                 style={{ cursor: 'pointer' }}
-                onClick={() => onSelectTeam(team.id)}
+                onClick={() => onSelectTeam(teamId)}
               >
-                <td>{team.rk ?? team.rank ?? '–'}</td>
+                <td>{team.rk ?? team.rank ?? team.position ?? '–'}</td>
                 <td>
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span className="title" style={{ fontWeight: 600 }}>{team.name}</span>
-                    <span className="small muted">{team.divisionName}</span>
+                    <span className="title" style={{ fontWeight: 600 }}>{team.name ?? team.teamName ?? 'Unknown team'}</span>
+                    <span className="small muted">{team.divisionName ?? team.poolName ?? ''}</span>
                   </div>
                 </td>
-                <td>{team.P ?? '–'}</td>
-                <td>{team.W ?? '–'}</td>
-                <td>{team.L ?? '–'}</td>
-                <td>{team.F ?? '–'}</td>
-                <td>{team.A ?? '–'}</td>
-                <td>{team.PTS ?? '–'}</td>
+                <td>{team.P ?? team.played ?? team.playedGames ?? '–'}</td>
+                <td>{team.W ?? team.won ?? team.wins ?? '–'}</td>
+                <td>{team.L ?? team.lost ?? team.losses ?? '–'}</td>
+                <td>{team.F ?? team.for ?? team.forPoints ?? '–'}</td>
+                <td>{team.A ?? team.against ?? team.againstPoints ?? '–'}</td>
+                <td>{team.PTS ?? team.points ?? team.totalPoints ?? '–'}</td>
                 <td>
                   <span className="small muted">{team.form?.join(' ') || '–'}</span>
                 </td>
@@ -381,23 +385,57 @@ export default function App() {
       setLadderLoading(true)
       setLadderError(null)
       try {
-        const params = new URLSearchParams({
-          divisionIds: String(selectedDivisionId),
-          competitionKey: selectedCompetition.uniqueKey
+        const ladderParams = new URLSearchParams({
+          organisationKey: ORG_KEY,
+          yearId: String(YEAR_REF_ID),
+          includeRecentMatchData: 'true',
+          competitionUniqueKey: selectedCompetition.uniqueKey,
+          divisionId: String(selectedDivisionId)
         })
-        const response = await fetch(`${API_BASE}/teams/ladder/v2?${params.toString()}`)
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`)
+
+        async function requestLadder(url) {
+          const response = await fetch(url)
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`)
+          }
+          const contentType = response.headers.get('content-type') || ''
+          if (!contentType.includes('application/json')) {
+            const text = await response.text()
+            try {
+              return JSON.parse(text)
+            } catch (parseError) {
+              throw new Error('Unexpected ladder response format')
+            }
+          }
+          return await response.json()
         }
-        const data = await response.json()
-        if (!cancelled) {
-          const rows = Array.isArray(data?.ladders) ? data.ladders : []
-          setLadderState({
-            rows,
-            lastResults: Array.isArray(data?.lastResults) ? data.lastResults : [],
-            nextResults: Array.isArray(data?.nextResults) ? data.nextResults : []
+
+        let ladderData
+        try {
+          ladderData = await requestLadder(`${LADDER_BASE_URL}?${ladderParams.toString()}`)
+        } catch (ladderError) {
+          const fallbackParams = new URLSearchParams({
+            divisionIds: String(selectedDivisionId),
+            competitionKey: selectedCompetition.uniqueKey
           })
-          setSelectedTeamId((current) => (rows.some((team) => team.id === current) ? current : null))
+          ladderData = await requestLadder(`${API_BASE}/teams/ladder/v2?${fallbackParams.toString()}`)
+        }
+
+        if (!cancelled) {
+          const rows = normalizeLadderRows(ladderData)
+          const lastResults = normalizeRecentResults(ladderData)
+          const nextResults = Array.isArray(ladderData?.nextResults)
+            ? ladderData.nextResults
+            : Array.isArray(ladderData?.recentMatchData?.nextResults)
+              ? ladderData.recentMatchData.nextResults
+              : []
+
+          setLadderState({ rows, lastResults, nextResults })
+          setSelectedTeamId((current) =>
+            rows.some((team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(current))
+              ? current
+              : null
+          )
         }
       } catch (error) {
         if (!cancelled) {
@@ -453,29 +491,48 @@ export default function App() {
   const ladderRows = useMemo(() => {
     const lastResultsMap = new Map()
     for (const item of ladderState.lastResults || []) {
-      lastResultsMap.set(item.teamId, item.last5 || [])
+      const key = item.teamId ?? item.team?.id ?? item.teamUniqueKey
+      lastResultsMap.set(String(key), item.last5 || item.form || [])
     }
 
-    return (ladderState.rows || []).map((team) => ({
-      ...team,
-      form: (lastResultsMap.get(team.id) || []).map((entry) => {
-        if (entry.code === 'WON') return 'W'
-        if (entry.code === 'DRAWN') return 'D'
-        return 'L'
-      })
-    }))
+    return (ladderState.rows || []).map((team) => {
+      const id = team.id ?? team.teamId ?? team.teamUniqueKey
+      const formEntries = lastResultsMap.get(String(id)) || []
+      return {
+        ...team,
+        id,
+        name: team.name ?? team.teamName ?? team.team?.name,
+        form: formEntries.map((entry) => {
+          const code = typeof entry === 'string' ? entry : entry.code || entry.result || entry.outcome
+          if (!code) return '–'
+          const upperCode = code.toUpperCase()
+          if (upperCode.startsWith('W')) return 'W'
+          if (upperCode.startsWith('D')) return 'D'
+          if (upperCode.startsWith('L')) return 'L'
+          return upperCode[0]
+        })
+      }
+    })
   }, [ladderState])
 
-  const selectedTeam = useMemo(
-    () => ladderRows.find((team) => team.id === selectedTeamId) || null,
-    [ladderRows, selectedTeamId]
-  )
+  const selectedTeam = useMemo(() => {
+    if (!selectedTeamId) return null
+    return (
+      ladderRows.find(
+        (team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(selectedTeamId)
+      ) || null
+    )
+  }, [ladderRows, selectedTeamId])
 
   const filteredMatches = useMemo(() => {
     if (!selectedTeamId) {
       return matches
     }
-    return matches.filter((match) => match.team1?.id === selectedTeamId || match.team2?.id === selectedTeamId)
+    return matches.filter((match) => {
+      const team1Id = match.team1?.id != null ? String(match.team1.id) : null
+      const team2Id = match.team2?.id != null ? String(match.team2.id) : null
+      return team1Id === String(selectedTeamId) || team2Id === String(selectedTeamId)
+    })
   }, [matches, selectedTeamId])
 
   return (
@@ -501,6 +558,12 @@ export default function App() {
         }}
       />
 
+      <TeamSelector
+        teams={ladderRows}
+        selectedTeamId={selectedTeamId}
+        onSelectTeam={(value) => setSelectedTeamId(value || null)}
+      />
+
       <nav className="tabs" style={{ marginBottom: 24 }}>
         {TABS.map((tab) => (
           <button
@@ -522,7 +585,9 @@ export default function App() {
             ladderRows={ladderRows}
             loading={ladderLoading}
             error={ladderError}
-            onSelectTeam={(teamId) => setSelectedTeamId((current) => (current === teamId ? null : teamId))}
+            onSelectTeam={(teamId) =>
+              setSelectedTeamId((current) => (String(current) === String(teamId) ? null : String(teamId)))
+            }
             selectedTeamId={selectedTeamId}
           />
         </div>
@@ -534,7 +599,7 @@ export default function App() {
           loading={matchesLoading}
           error={matchesError}
           selectedTeamId={selectedTeamId}
-          selectedTeamName={selectedTeam?.name}
+          selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
           onClearTeam={() => setSelectedTeamId(null)}
         />
       )}
@@ -542,11 +607,100 @@ export default function App() {
       {activeTab === 'player-stats' && (
         <div className="card" style={{ padding: 16 }}>
           <h2 style={{ marginTop: 0 }}>Player statistics</h2>
-          <p className="muted">
-            Player statistics for the selected division will appear here when available through the public API.
-          </p>
+          {selectedTeamId ? (
+            <p className="muted">
+              Player statistics for <strong>{selectedTeam?.name ?? selectedTeam?.teamName}</strong> are not available via the
+              public API yet. Check back later!
+            </p>
+          ) : (
+            <p className="muted">Select a team from the ladder or dropdown to view their player statistics when available.</p>
+          )}
         </div>
       )}
     </div>
   )
+}
+
+function TeamSelector({ teams, selectedTeamId, onSelectTeam }) {
+  const sortedTeams = useMemo(() => {
+    return [...(teams || [])]
+      .map((team) => ({
+        id: team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName,
+        name: team.name ?? team.teamName ?? team.team?.name ?? 'Unknown team'
+      }))
+      .filter((team) => team.id != null && team.name)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [teams])
+
+  if (sortedTeams.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
+      <label className="field" style={{ marginBottom: 0 }}>
+        <span className="field-label">Team</span>
+        <select
+          className="field-input"
+          value={selectedTeamId ?? ''}
+          onChange={(event) => {
+            const value = event.target.value
+            onSelectTeam(value === '' ? null : String(value))
+          }}
+        >
+          <option value="">All teams</option>
+          {sortedTeams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+        </select>
+        <span className="field-help">Use the dropdown or click a team in the ladder to focus their fixtures.</span>
+      </label>
+    </div>
+  )
+}
+
+function normalizeLadderRows(ladderData) {
+  if (!ladderData) {
+    return []
+  }
+
+  const ladderCandidates = [
+    ladderData?.ladder,
+    ladderData?.ladderData?.ladder,
+    ladderData?.data?.ladder,
+    ladderData?.ladders,
+    ladderData?.rows,
+    Array.isArray(ladderData) ? ladderData : null
+  ]
+
+  const ladderRows = ladderCandidates.find((candidate) => Array.isArray(candidate)) || []
+
+  return ladderRows.map((team) => ({
+    ...team,
+    id: team.id ?? team.teamId ?? team.teamUniqueKey ?? team.team?.id ?? team.teamName,
+    name: team.name ?? team.teamName ?? team.team?.name
+  }))
+}
+
+function normalizeRecentResults(ladderData) {
+  if (!ladderData) {
+    return []
+  }
+
+  const candidates = [
+    ladderData?.lastResults,
+    ladderData?.recentMatchData?.lastResults,
+    ladderData?.recentMatches,
+    ladderData?.ladderRecentMatchData?.lastResults
+  ]
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate
+    }
+  }
+
+  return []
 }
