@@ -510,9 +510,15 @@ export default function App() {
       const aggregatedEntries = []
       let offset = 0
       const limit = 200
+      const visitedOffsets = new Set()
 
       try {
         while (!cancelled) {
+          if (visitedOffsets.has(offset)) {
+            break
+          }
+          visitedOffsets.add(offset)
+
           const params = new URLSearchParams({
             competitionId: String(selectedCompetition.id),
             divisionId: String(selectedDivisionId),
@@ -537,14 +543,17 @@ export default function App() {
             throw new Error('Unexpected player statistics response format')
           }
 
-          const pageEntries = Array.isArray(data?.result) ? data.result : []
-          aggregatedEntries.push(...pageEntries)
+          const pageEntries = extractPlayerStatsEntries(data)
+          if (pageEntries.length > 0) {
+            aggregatedEntries.push(...pageEntries)
+          }
 
-          const nextPageValue = Number(data?.page?.nextPage ?? 0)
-          if (!Number.isFinite(nextPageValue) || nextPageValue <= offset || pageEntries.length === 0) {
+          const nextOffset = getNextPlayerStatsOffset(data, offset, limit, pageEntries.length)
+          if (nextOffset == null) {
             break
           }
-          offset = nextPageValue
+
+          offset = nextOffset
         }
 
         if (!cancelled) {
@@ -1106,4 +1115,61 @@ function formatAverageStat(value) {
     return value.toFixed(1)
   }
   return '–'
+}
+
+function extractPlayerStatsEntries(body) {
+  if (!body) {
+    return []
+  }
+
+  if (Array.isArray(body)) {
+    return body
+  }
+
+  const candidates = [body.result, body.data, body.records]
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate
+    }
+  }
+
+  return []
+}
+
+function getNextPlayerStatsOffset(body, currentOffset, limit, pageEntriesLength) {
+  if (!body || pageEntriesLength === 0) {
+    return null
+  }
+
+  if (typeof limit === 'number' && Number.isFinite(limit) && pageEntriesLength < limit) {
+    return null
+  }
+
+  const candidates = []
+
+  if (body.page && typeof body.page === 'object') {
+    candidates.push(body.page.nextOffset, body.page.nextPage, body.page.next)
+  }
+
+  if (body.pagination && typeof body.pagination === 'object') {
+    candidates.push(
+      body.pagination.nextOffset,
+      body.pagination.nextPage,
+      body.pagination.next
+    )
+  }
+
+  candidates.push(body.nextOffset, body.nextPage, body.next)
+
+  for (const candidate of candidates) {
+    if (candidate == null || candidate === '') {
+      continue
+    }
+    const next = Number(candidate)
+    if (Number.isFinite(next) && next > currentOffset) {
+      return next
+    }
+  }
+
+  return null
 }
