@@ -45,6 +45,11 @@ The app can look up live BasketballConnect data for any organisation/year once y
 5. When results are found, press **Add “Tournament name”** to save it. The tournament becomes the active context immediately and persists in your browser’s local storage so it’s ready next time you load the app.
 6. Switch between saved tournaments using the “Active tournament” dropdown, or remove a saved tournament with **Remove this tournament**.
 
+### Where are saved tournaments stored?
+
+- Tournaments you add are written to `localStorage` in your browser under the keys `bc:tournamentContexts` (the full list) and `bc:activeTournamentContextId` (the currently selected one).
+- Because they are stored locally, each browser/device keeps its own list. Clearing site data or using a new browser profile resets the list back to the default Murray Bridge Carnival context.
+
 ### Find a BasketballConnect organisation key
 1. Sign in to [BasketballConnect](https://websites.mygameday.app/comp) and open any page that belongs to the organisation you need.
 2. Look at the address bar. Organisation pages include `organisationKey=<value>` (e.g. `.../organisationKey=a1b2c3`); copy that value.
