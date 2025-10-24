@@ -94,6 +94,49 @@ function LoadingMessage({ text }) {
   return <p className="small muted" style={{ margin: '16px 0' }}>{text}</p>
 }
 
+function ConfigurationPanel({
+  organisationKey,
+  onOrganisationKeyChange,
+  yearRefId,
+  onYearRefIdChange,
+  hasValidConfig
+}) {
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 24, display: 'grid', gap: 12 }}>
+      <div>
+        <h2 style={{ marginBottom: 4, fontSize: 18 }}>Connection settings</h2>
+        <p className="small muted" style={{ margin: 0 }}>
+          Provide your BasketballConnect organisation key and year reference ID to load live data.
+        </p>
+      </div>
+      {!hasValidConfig && (
+        <p className="small" style={{ margin: 0, color: '#a00', fontWeight: 600 }}>
+          Enter your BasketballConnect credentials or configure <code>.env</code> to access live data.
+        </p>
+      )}
+      <label className="field">
+        <span className="field-label">Organisation key</span>
+        <input
+          className="field-input"
+          value={organisationKey}
+          onChange={(event) => onOrganisationKeyChange(event.target.value)}
+          placeholder="e.g. ABC123"
+        />
+      </label>
+      <label className="field">
+        <span className="field-label">Year reference ID</span>
+        <input
+          className="field-input"
+          value={yearRefId}
+          onChange={(event) => onYearRefIdChange(event.target.value)}
+          placeholder="e.g. 2024"
+          inputMode="numeric"
+        />
+      </label>
+    </div>
+  )
+}
+
 function CompetitionSelectors({
   competitions,
   competitionLoading,
@@ -262,10 +305,37 @@ function FixturesView({
 export default function App() {
   const [activeTab, setActiveTab] = useState('ladder')
 
-  const organisationKey = ORG_KEY
-  const yearRefId = YEAR_REF_ID
-  const hasValidConfig =
-    typeof organisationKey === 'string' && organisationKey.trim() !== '' && Number.isFinite(yearRefId)
+  const [organisationKeyInput, setOrganisationKeyInput] = useState(() => (ORG_KEY ?? '').trim())
+  const [yearRefIdInput, setYearRefIdInput] = useState(() =>
+    Number.isFinite(YEAR_REF_ID) ? String(YEAR_REF_ID) : (import.meta.env.VITE_YEAR_REF_ID ?? '').trim()
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const storedOrgKey = window.localStorage.getItem('hoopsHub.organisationKey')
+    const storedYearRefId = window.localStorage.getItem('hoopsHub.yearRefId')
+    if (storedOrgKey) {
+      setOrganisationKeyInput(storedOrgKey)
+    }
+    if (storedYearRefId) {
+      setYearRefIdInput(storedYearRefId)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('hoopsHub.organisationKey', organisationKeyInput)
+  }, [organisationKeyInput])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('hoopsHub.yearRefId', yearRefIdInput)
+  }, [yearRefIdInput])
+
+  const organisationKey = organisationKeyInput.trim()
+  const parsedYearRefId = Number(yearRefIdInput)
+  const yearRefId = Number.isFinite(parsedYearRefId) ? parsedYearRefId : null
+  const hasValidConfig = organisationKey !== '' && yearRefId != null
 
   const [competitions, setCompetitions] = useState([])
   const [competitionLoading, setCompetitionLoading] = useState(true)
@@ -298,7 +368,7 @@ export default function App() {
   useEffect(() => {
     if (!hasValidConfig) {
       setCompetitionLoading(false)
-      setCompetitionError('Set VITE_ORG_KEY and VITE_YEAR_REF_ID in your environment configuration.')
+      setCompetitionError('Enter a BasketballConnect organisation key and year reference ID to continue.')
       return
     }
 
@@ -392,7 +462,7 @@ export default function App() {
   }, [selectedCompetition])
 
   useEffect(() => {
-    if (!selectedCompetition || !selectedDivisionId || !hasValidConfig) {
+    if (!selectedCompetition || !selectedDivisionId || !hasValidConfig || yearRefId == null) {
       setLadderState({ rows: [], lastResults: [], nextResults: [] })
       setMatches([])
       return
@@ -561,9 +631,13 @@ export default function App() {
         <p className="small muted">Browse ladders and fixtures for BasketballConnect competitions.</p>
       </header>
 
-      {!hasValidConfig && (
-        <ErrorCard message="Set VITE_ORG_KEY and VITE_YEAR_REF_ID in your .env file to load live data." />
-      )}
+      <ConfigurationPanel
+        organisationKey={organisationKeyInput}
+        onOrganisationKeyChange={setOrganisationKeyInput}
+        yearRefId={yearRefIdInput}
+        onYearRefIdChange={setYearRefIdInput}
+        hasValidConfig={hasValidConfig}
+      />
 
       <CompetitionSelectors
         competitions={competitions}

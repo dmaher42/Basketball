@@ -13,6 +13,10 @@ A focused Vite + React app for browsing live ladders and fixtures from Basketbal
    - `VITE_ORG_KEY` – organisation key
    - `VITE_YEAR_REF_ID` – year reference ID (numeric)
 
+If you do not have these values during development, you can still interact with the app by entering
+them in the “Connection settings” panel rendered on the page. The values are stored locally in the
+browser and reused on subsequent visits.
+
 ## Deployment
 ### Vercel
 - Build command: `npm run build`
