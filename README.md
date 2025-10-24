@@ -1,17 +1,22 @@
-# Hoops Hub – Murray Bridge Carnival (MVP)
+# Hoops Hub – Live Scores
 
-Mobile-first React app (Vite) that shows team schedule, ladder, league draw and player stats.
-Currently uses mock data in `src/data/mb_carnival.json`.
+Mobile-first React app (Vite) that shows live ladders and fixtures for BasketballConnect competitions.
 
 ## Run locally
 1. Install Node.js 18+
 2. Install deps: `npm install`
 3. Start dev server: `npm run dev`
 
+## Configuration
+1. Copy `.env.example` to `.env`.
+2. Fill in:
+   - `VITE_ORG_KEY` – your BasketballConnect organisation key
+   - `VITE_YEAR_REF_ID` – the BasketballConnect year reference ID to load
+
 ## Deploy options
 ### A) GitHub Pages (static hosting)
-1. Create a **public** GitHub repo, e.g. `hoops-hub-murray-bridge`
-2. In `vite.config.js`, set `base` to `'/hoops-hub-murray-bridge/'` (must match your repo name with leading/trailing slashes)
+1. Create a **public** GitHub repo, e.g. `hoops-hub`
+2. In `vite.config.js`, set `base` to `'/hoops-hub/'` (must match your repo name with leading/trailing slashes)
 3. Commit and push the project
 4. Install dependencies (includes `gh-pages`): `npm install`
 5. Deploy to Pages: `npm run deploy` (builds the site and publishes `dist/` to the `gh-pages` branch)
@@ -23,29 +28,10 @@ Currently uses mock data in `src/data/mb_carnival.json`.
 3. Publish directory: `dist`
 4. Netlify will build and deploy automatically on push
 
-## Swap to real data later
-- Replace `src/data/mb_carnival.json` with live data (same shape). You can fetch from your own API or GitHub raw JSON.
-- To fetch from GitHub Raw, for example, use:
-  ```js
-  // in App.jsx
-  useEffect(() => {
-    fetch('https://raw.githubusercontent.com/<you>/<repo>/main/data/mb_carnival.json')
-      .then(r => r.json()).then(setLeague)
-  }, [])
-  ```
-- Keep the file shape the same: `{ id, name, org, season, teams[], ladder[], fixtures[], playerStats{} }`
-
-## Add tournaments by organisation key
-The app can look up live BasketballConnect data for any organisation/year once you know their identifiers.
-
-1. Open the app and scroll to the **Tournaments** card at the top of the page.
-2. Paste the BasketballConnect **Organisation key** into the “Organisation key” field.
-3. Enter the season’s **Year reference ID** (the same `yearRefId` value BasketballConnect uses in its URLs).
-4. Click **Search**. The app calls the BasketballConnect competitions API to confirm the combination exists.
-5. When results are found, press **Add “Tournament name”** to save it. The tournament becomes the active context immediately and persists in your browser’s local storage so it’s ready next time you load the app.
-6. Switch between saved tournaments using the “Active tournament” dropdown, or remove a saved tournament with **Remove this tournament**.
+### C) Vercel
+- Build command: `npm run build`
+- Output directory: `dist`
 
 ## Notes
 - If using GitHub Pages, ensure `vite.config.js` `base` matches the repo name exactly.
-- You can change the initial team by editing `selectedTeamId` in `src/App.jsx`.
-- Add more teams/fixtures by editing `src/data/mb_carnival.json`.
+- Set `VITE_ORG_KEY` and `VITE_YEAR_REF_ID` in `.env` before building to load live data.
