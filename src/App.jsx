@@ -1,95 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import carnivalData from './data/mb_carnival.json'
 
-const DEFAULT_ORG_KEY = '3416293c-d99b-47de-8866-74a6138f0740'
-const DEFAULT_YEAR_REF_ID = 8
 const API_BASE = 'https://api-basketball.squadi.com/livescores'
 const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
 const IGNORE_STATUSES = encodeURIComponent(JSON.stringify([1]))
 
-const CONTEXTS_STORAGE_KEY = 'bc:tournamentContexts'
-const ACTIVE_CONTEXT_STORAGE_KEY = 'bc:activeTournamentContextId'
-const DEFAULT_CONTEXT = {
-  id: 'default',
-  label: 'Murray Bridge Carnival',
-  orgKey: DEFAULT_ORG_KEY,
-  yearRefId: DEFAULT_YEAR_REF_ID
-}
+const ORG_KEY = import.meta.env.VITE_ORG_KEY
+const YEAR_REF_ID = Number(import.meta.env.VITE_YEAR_REF_ID)
 
 const TABS = [
   { id: 'ladder', label: 'Ladder' },
-  { id: 'fixtures', label: 'Fixtures' },
-  { id: 'player-stats', label: 'Player Stats' }
+  { id: 'fixtures', label: 'Fixtures' }
 ]
-
-function generateContextId() {
-  return `ctx-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`
-}
-
-function sanitizeContexts(contexts) {
-  if (!Array.isArray(contexts)) return [DEFAULT_CONTEXT]
-  const map = new Map()
-  for (const context of contexts) {
-    if (!context || typeof context !== 'object') continue
-    const orgKey = typeof context.orgKey === 'string' ? context.orgKey.trim() : ''
-    const yearRefId = Number(context.yearRefId)
-    if (!orgKey || Number.isNaN(yearRefId)) continue
-    const combinationKey = `${orgKey}-${yearRefId}`
-    const id = typeof context.id === 'string' && context.id ? context.id : `${orgKey}-${yearRefId}`
-    const label = typeof context.label === 'string' && context.label.trim()
-      ? context.label.trim()
-      : `${orgKey.slice(0, 8)}… (${yearRefId})`
-    const normalizedContext = { id, label, orgKey, yearRefId }
-    if (map.has(combinationKey)) {
-      map.delete(combinationKey)
-    }
-    map.set(combinationKey, normalizedContext)
-  }
-  const orderedContexts = []
-  const idSet = new Set()
-  for (const context of map.values()) {
-    let contextId = context.id
-    while (idSet.has(contextId)) {
-      contextId = `${contextId}-${Math.random().toString(36).slice(2, 6)}`
-    }
-    idSet.add(contextId)
-    orderedContexts.push({ ...context, id: contextId })
-  }
-
-  const otherContexts = orderedContexts.filter(
-    (context) =>
-      context.id !== DEFAULT_CONTEXT.id &&
-      (context.orgKey !== DEFAULT_CONTEXT.orgKey || context.yearRefId !== DEFAULT_CONTEXT.yearRefId)
-  )
-
-  return [DEFAULT_CONTEXT, ...otherContexts]
-}
-
-function loadStoredContexts() {
-  if (typeof window === 'undefined') return [DEFAULT_CONTEXT]
-  try {
-    const stored = window.localStorage.getItem(CONTEXTS_STORAGE_KEY)
-    if (!stored) return [DEFAULT_CONTEXT]
-    const parsed = JSON.parse(stored)
-    return sanitizeContexts(parsed)
-  } catch (error) {
-    console.warn('Failed to load stored tournament contexts', error)
-    return [DEFAULT_CONTEXT]
-  }
-}
-
-function loadStoredActiveContextId(contexts) {
-  if (typeof window === 'undefined') return contexts[0]?.id ?? DEFAULT_CONTEXT.id
-  try {
-    const stored = window.localStorage.getItem(ACTIVE_CONTEXT_STORAGE_KEY)
-    if (stored && contexts.some((context) => context.id === stored)) {
-      return stored
-    }
-  } catch (error) {
-    console.warn('Failed to load active tournament context', error)
-  }
-  return contexts[0]?.id ?? DEFAULT_CONTEXT.id
-}
 
 function formatDateTime(isoString) {
   if (!isoString) {
@@ -171,181 +92,6 @@ function ErrorCard({ message }) {
 function LoadingMessage({ text }) {
   if (!text) return null
   return <p className="small muted" style={{ margin: '16px 0' }}>{text}</p>
-}
-
-function TournamentManager({
-  contexts,
-  activeContextId,
-  onSelectContext,
-  onAddContext,
-  onRemoveContext
-}) {
-  const [label, setLabel] = useState('')
-  const [orgKey, setOrgKey] = useState('')
-  const [year, setYear] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [preview, setPreview] = useState(null)
-
-  const orderedContexts = contexts
-
-  async function handleSearch(event) {
-    event.preventDefault()
-    const trimmedOrgKey = orgKey.trim()
-    const parsedYear = Number(year)
-    if (!trimmedOrgKey || Number.isNaN(parsedYear)) {
-      setError('Enter a valid organisation key and year.')
-      setPreview(null)
-      return
-    }
-
-    setLoading(true)
-    setError(null)
-    setPreview(null)
-
-    try {
-      const response = await fetch(
-        `${API_BASE}/competitions/list?organisationUniqueKey=${encodeURIComponent(trimmedOrgKey)}&yearRefId=${parsedYear}`
-      )
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
-      }
-      const data = await response.json()
-      if (!Array.isArray(data) || data.length === 0) {
-        setError('No competitions found for that organisation and year.')
-        setPreview(null)
-        return
-      }
-      const suggestedLabel = label.trim() || data[0].longName || data[0].name || 'Tournament'
-      setPreview({
-        label: suggestedLabel,
-        orgKey: trimmedOrgKey,
-        yearRefId: parsedYear,
-        competitionCount: data.length
-      })
-      setError(null)
-    } catch (searchError) {
-      setError(searchError.message || 'Search failed. Please try again.')
-      setPreview(null)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function handleAddPreview() {
-    if (!preview) return
-    const newContext = onAddContext({
-      label: preview.label,
-      orgKey: preview.orgKey,
-      yearRefId: preview.yearRefId
-    })
-    if (newContext) {
-      setLabel('')
-      setOrgKey('')
-      setYear('')
-      setPreview(null)
-      setError(null)
-    }
-  }
-
-  const activeContext = contexts.find((context) => context.id === activeContextId)
-
-  return (
-    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
-      <h2 style={{ marginTop: 0 }}>Tournaments</h2>
-
-      <div className="field" style={{ marginBottom: 16 }}>
-        <label className="field-label" htmlFor="active-tournament">
-          Active tournament
-        </label>
-        <select
-          id="active-tournament"
-          className="field-input"
-          value={activeContextId ?? ''}
-          onChange={(event) => onSelectContext(event.target.value)}
-        >
-          {orderedContexts.map((context) => (
-            <option key={context.id} value={context.id}>
-              {context.label} · {context.yearRefId}
-            </option>
-          ))}
-        </select>
-        <p className="field-help">
-          {activeContext
-            ? `Organisation key: ${activeContext.orgKey}`
-            : 'Select a tournament to load its competitions.'}
-        </p>
-        {activeContext && activeContext.id !== DEFAULT_CONTEXT.id && (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => onRemoveContext(activeContext.id)}
-            style={{ marginTop: 8 }}
-          >
-            Remove this tournament
-          </button>
-        )}
-      </div>
-
-      <form onSubmit={handleSearch} className="field" style={{ marginBottom: 0 }}>
-        <h3 style={{ margin: '16px 0 8px' }}>Find another tournament</h3>
-        <label className="field-label" htmlFor="tournament-label">
-          Display name (optional)
-        </label>
-        <input
-          id="tournament-label"
-          className="field-input"
-          type="text"
-          value={label}
-          onChange={(event) => setLabel(event.target.value)}
-          placeholder="e.g. State Championships"
-        />
-
-        <label className="field-label" htmlFor="tournament-org" style={{ marginTop: 12 }}>
-          Organisation key
-        </label>
-        <input
-          id="tournament-org"
-          className="field-input"
-          type="text"
-          value={orgKey}
-          onChange={(event) => setOrgKey(event.target.value)}
-          placeholder="Paste the BasketballConnect organisation key"
-          required
-        />
-
-        <label className="field-label" htmlFor="tournament-year" style={{ marginTop: 12 }}>
-          Year reference ID
-        </label>
-        <input
-          id="tournament-year"
-          className="field-input"
-          type="number"
-          value={year}
-          onChange={(event) => setYear(event.target.value)}
-          placeholder="e.g. 8"
-          required
-          min="1"
-        />
-
-        <button type="submit" className="btn btn-dark" style={{ marginTop: 16 }} disabled={loading}>
-          {loading ? 'Searching…' : 'Search'}
-        </button>
-
-        {error && <p className="field-help" style={{ color: '#c00' }}>{error}</p>}
-        {preview && !error && (
-          <div className="card" style={{ marginTop: 16, padding: 12, background: '#f8fafc' }}>
-            <p style={{ margin: '0 0 8px' }}>
-              Found {preview.competitionCount} competitions for this tournament.
-            </p>
-            <button type="button" className="btn" onClick={handleAddPreview}>
-              Add “{preview.label}”
-            </button>
-          </div>
-        )}
-      </form>
-    </div>
-  )
 }
 
 function CompetitionSelectors({
@@ -516,53 +262,10 @@ function FixturesView({
 export default function App() {
   const [activeTab, setActiveTab] = useState('ladder')
 
-  const [tournamentContexts, setTournamentContexts] = useState(() => loadStoredContexts())
-  const [activeContextId, setActiveContextId] = useState(() =>
-    loadStoredActiveContextId(loadStoredContexts())
-  )
-
-  useEffect(() => {
-    setTournamentContexts((contexts) => sanitizeContexts(contexts))
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      window.localStorage.setItem(CONTEXTS_STORAGE_KEY, JSON.stringify(tournamentContexts))
-    } catch (error) {
-      console.warn('Failed to persist tournament contexts', error)
-    }
-  }, [tournamentContexts])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      if (activeContextId) {
-        window.localStorage.setItem(ACTIVE_CONTEXT_STORAGE_KEY, activeContextId)
-      } else {
-        window.localStorage.removeItem(ACTIVE_CONTEXT_STORAGE_KEY)
-      }
-    } catch (error) {
-      console.warn('Failed to persist active tournament context', error)
-    }
-  }, [activeContextId])
-
-  useEffect(() => {
-    if (!tournamentContexts.some((context) => context.id === activeContextId)) {
-      setActiveContextId(tournamentContexts[0]?.id ?? DEFAULT_CONTEXT.id)
-    }
-  }, [tournamentContexts, activeContextId])
-
-  const activeContext = useMemo(
-    () =>
-      tournamentContexts.find((context) => context.id === activeContextId) ??
-      tournamentContexts[0] ??
-      DEFAULT_CONTEXT,
-    [tournamentContexts, activeContextId]
-  )
-
-  const organisationKey = activeContext?.orgKey ?? DEFAULT_ORG_KEY
-  const yearRefId = activeContext?.yearRefId ?? DEFAULT_YEAR_REF_ID
+  const organisationKey = ORG_KEY
+  const yearRefId = YEAR_REF_ID
+  const hasValidConfig =
+    typeof organisationKey === 'string' && organisationKey.trim() !== '' && Number.isFinite(yearRefId)
 
   const [competitions, setCompetitions] = useState([])
   const [competitionLoading, setCompetitionLoading] = useState(true)
@@ -584,39 +287,6 @@ export default function App() {
 
   const [selectedTeamId, setSelectedTeamId] = useState(null)
 
-  function handleSelectContext(contextId) {
-    if (tournamentContexts.some((context) => context.id === contextId)) {
-      setActiveContextId(contextId)
-    }
-  }
-
-  function handleAddContext({ label, orgKey, yearRefId }) {
-    const trimmedOrgKey = typeof orgKey === 'string' ? orgKey.trim() : ''
-    const numericYear = Number(yearRefId)
-    if (!trimmedOrgKey || Number.isNaN(numericYear)) {
-      return null
-    }
-    const normalizedLabel = label && label.trim()
-      ? label.trim()
-      : `${trimmedOrgKey.slice(0, 8)}… (${numericYear})`
-    const newContext = {
-      id: generateContextId(),
-      label: normalizedLabel,
-      orgKey: trimmedOrgKey,
-      yearRefId: numericYear
-    }
-    setTournamentContexts((previous) => sanitizeContexts([...previous, newContext]))
-    setActiveContextId(newContext.id)
-    return newContext
-  }
-
-  function handleRemoveContext(contextId) {
-    if (contextId === DEFAULT_CONTEXT.id) return
-    setTournamentContexts((previous) =>
-      sanitizeContexts(previous.filter((context) => context.id !== contextId))
-    )
-  }
-
   useEffect(() => {
     setCompetitions([])
     setSelectedCompetitionId(null)
@@ -626,11 +296,17 @@ export default function App() {
   }, [organisationKey, yearRefId])
 
   useEffect(() => {
+    if (!hasValidConfig) {
+      setCompetitionLoading(false)
+      setCompetitionError('Set VITE_ORG_KEY and VITE_YEAR_REF_ID in your environment configuration.')
+      return
+    }
+
     let cancelled = false
+    setCompetitionLoading(true)
+    setCompetitionError(null)
 
     async function fetchCompetitions() {
-      setCompetitionLoading(true)
-      setCompetitionError(null)
       try {
         const response = await fetch(
           `${API_BASE}/competitions/list?organisationUniqueKey=${organisationKey}&yearRefId=${yearRefId}`
@@ -656,14 +332,12 @@ export default function App() {
       }
     }
 
-    if (organisationKey && yearRefId) {
-      fetchCompetitions()
-    }
+    fetchCompetitions()
 
     return () => {
       cancelled = true
     }
-  }, [organisationKey, yearRefId])
+  }, [organisationKey, yearRefId, hasValidConfig])
 
   const selectedCompetition = useMemo(
     () => competitions.find((competition) => competition.id === selectedCompetitionId) || null,
@@ -718,7 +392,7 @@ export default function App() {
   }, [selectedCompetition])
 
   useEffect(() => {
-    if (!selectedCompetition || !selectedDivisionId) {
+    if (!selectedCompetition || !selectedDivisionId || !hasValidConfig) {
       setLadderState({ rows: [], lastResults: [], nextResults: [] })
       setMatches([])
       return
@@ -831,7 +505,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [selectedCompetition, selectedDivisionId])
+  }, [selectedCompetition, selectedDivisionId, hasValidConfig, organisationKey, yearRefId])
 
   const ladderRows = useMemo(() => {
     const lastResultsMap = new Map()
@@ -880,27 +554,16 @@ export default function App() {
     })
   }, [matches, selectedTeamId])
 
-  const playerStatsIndex = useMemo(() => buildPlayerStatsIndex(carnivalData), [])
-
-  const selectedTeamStats = useMemo(
-    () => getPlayerStatsForTeam(playerStatsIndex, selectedTeamId, selectedTeam),
-    [playerStatsIndex, selectedTeamId, selectedTeam]
-  )
-
   return (
     <div className="container" style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
       <header style={{ marginBottom: 24 }}>
         <h1 style={{ marginBottom: 8 }}>Live Scores</h1>
-        <p className="small muted">Browse ladders, fixtures and player stats for BasketballConnect competitions.</p>
+        <p className="small muted">Browse ladders and fixtures for BasketballConnect competitions.</p>
       </header>
 
-      <TournamentManager
-        contexts={tournamentContexts}
-        activeContextId={activeContext?.id}
-        onSelectContext={handleSelectContext}
-        onAddContext={handleAddContext}
-        onRemoveContext={handleRemoveContext}
-      />
+      {!hasValidConfig && (
+        <ErrorCard message="Set VITE_ORG_KEY and VITE_YEAR_REF_ID in your .env file to load live data." />
+      )}
 
       <CompetitionSelectors
         competitions={competitions}
@@ -961,17 +624,6 @@ export default function App() {
           selectedTeamId={selectedTeamId}
           selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
           onClearTeam={() => setSelectedTeamId(null)}
-        />
-      )}
-
-      {activeTab === 'player-stats' && (
-        <PlayerStatsView
-          selectedTeamId={selectedTeamId}
-          selectedTeam={selectedTeam}
-          selectedTeamStats={selectedTeamStats}
-          leaders={playerStatsIndex.leaders}
-          statsSourceName={carnivalData?.name}
-          hasStats={playerStatsIndex.hasData}
         />
       )}
     </div>
@@ -1060,280 +712,4 @@ function normalizeRecentResults(ladderData) {
   }
 
   return []
-}
-
-function PlayerStatsView({
-  selectedTeamId,
-  selectedTeam,
-  selectedTeamStats,
-  leaders,
-  statsSourceName,
-  hasStats
-}) {
-  const hasSelectedTeam = Boolean(selectedTeamId)
-  const teamPlayers = selectedTeamStats?.players?.length ? [...selectedTeamStats.players] : []
-  teamPlayers.sort((a, b) => {
-    const ppgDiff = (b.ppg ?? 0) - (a.ppg ?? 0)
-    if (ppgDiff !== 0) return ppgDiff
-    const ptsDiff = (b.pts ?? 0) - (a.pts ?? 0)
-    if (ptsDiff !== 0) return ptsDiff
-    return (a.name || '').localeCompare(b.name || '')
-  })
-
-  const teamDisplayName =
-    selectedTeam?.name ??
-    selectedTeam?.teamName ??
-    selectedTeamStats?.team?.name ??
-    (hasSelectedTeam ? 'Selected team' : null)
-
-  const teamDivision =
-    selectedTeamStats?.team?.division ??
-    selectedTeamStats?.team?.divisionName ??
-    selectedTeam?.divisionName ??
-    selectedTeam?.poolName ??
-    null
-
-  const topPlayers = Array.isArray(leaders) ? leaders.slice(0, 10) : []
-
-  return (
-    <div className="card" style={{ padding: 16 }}>
-      <h2 style={{ marginTop: 0 }}>Player statistics</h2>
-
-      {hasSelectedTeam ? (
-        teamPlayers.length > 0 ? (
-          <div>
-            <div style={{ marginBottom: 12 }}>
-              <div className="title" style={{ fontSize: 18 }}>{teamDisplayName}</div>
-              {teamDivision && <div className="small muted">{teamDivision}</div>}
-            </div>
-
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: 40 }}>#</th>
-                  <th style={{ textAlign: 'left' }}>Player</th>
-                  <th>GP</th>
-                  <th>PTS</th>
-                  <th>PPG</th>
-                </tr>
-              </thead>
-              <tbody>
-                {teamPlayers.map((player, index) => (
-                  <tr key={player.id ?? `${player.name}-${index}`}>
-                    <td>{index + 1}</td>
-                    <td style={{ textAlign: 'left' }}>{player.name ?? 'Unknown player'}</td>
-                    <td>{formatIntegerStat(player.gp)}</td>
-                    <td>{formatIntegerStat(player.pts)}</td>
-                    <td>{formatAverageStat(player.ppg)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div>
-            <p className="muted" style={{ marginBottom: topPlayers.length > 0 ? 16 : 0 }}>
-              Player statistics for <strong>{teamDisplayName}</strong> are not available yet. Select another team or check back
-              once stats have been recorded.
-            </p>
-            {topPlayers.length > 0 && (
-              <div>
-                <h3 style={{ marginBottom: 8, marginTop: 0 }}>Carnival leaders</h3>
-                <LeadersTable players={topPlayers} />
-              </div>
-            )}
-          </div>
-        )
-      ) : topPlayers.length > 0 ? (
-        <div>
-          <p className="muted">
-            Select a team from the ladder or dropdown to view detailed player numbers. In the meantime, here are the current
-            carnival leaders.
-          </p>
-          <LeadersTable players={topPlayers} />
-        </div>
-      ) : (
-        <p className="muted">Player statistics will appear here once data has been provided for this competition.</p>
-      )}
-
-      {hasStats && (
-        <p className="small muted" style={{ marginTop: 16 }}>
-          Data source: {statsSourceName || 'sample carnival data'}. Replace <code>src/data/mb_carnival.json</code> to update the
-          statistics with your own feed.
-        </p>
-      )}
-    </div>
-  )
-}
-
-function LeadersTable({ players }) {
-  if (!players || players.length === 0) {
-    return null
-  }
-
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th style={{ width: 40 }}>#</th>
-          <th style={{ textAlign: 'left' }}>Player</th>
-          <th style={{ textAlign: 'left' }}>Team</th>
-          <th>GP</th>
-          <th>PTS</th>
-          <th>PPG</th>
-        </tr>
-      </thead>
-      <tbody>
-        {players.map((player, index) => (
-          <tr key={`${player.teamId}-${player.id ?? player.name ?? index}`}>
-            <td>{index + 1}</td>
-            <td style={{ textAlign: 'left' }}>{player.name ?? 'Unknown player'}</td>
-            <td style={{ textAlign: 'left' }}>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span>{player.teamName ?? 'Unknown team'}</span>
-                {player.division && <span className="small muted">{player.division}</span>}
-              </div>
-            </td>
-            <td>{formatIntegerStat(player.gp)}</td>
-            <td>{formatIntegerStat(player.pts)}</td>
-            <td>{formatAverageStat(player.ppg)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
-function buildPlayerStatsIndex(data) {
-  const empty = {
-    byId: new Map(),
-    byName: new Map(),
-    leaders: [],
-    hasData: false
-  }
-
-  if (!data || typeof data !== 'object') {
-    return empty
-  }
-
-  const playerStats = data.playerStats && typeof data.playerStats === 'object' ? data.playerStats : null
-  if (!playerStats) {
-    return empty
-  }
-
-  const teams = Array.isArray(data.teams) ? data.teams : []
-  const teamMetaById = new Map()
-  for (const team of teams) {
-    const identifier = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.name
-    if (identifier != null) {
-      teamMetaById.set(String(identifier), team)
-    }
-  }
-
-  for (const [teamKey, players] of Object.entries(playerStats)) {
-    const teamId = String(teamKey)
-    const normalizedPlayers = Array.isArray(players)
-      ? players.map((player) => ({
-          ...player,
-          gp: toNumber(player.gp),
-          pts: toNumber(player.pts),
-          ppg: toNumber(player.ppg)
-        }))
-      : []
-
-    if (normalizedPlayers.length > 0) {
-      empty.hasData = true
-    }
-
-    const teamMeta = teamMetaById.get(teamId) || null
-    const entry = { teamId, team: teamMeta, players: normalizedPlayers }
-
-    empty.byId.set(teamId, entry)
-
-    const normalizedTeamName = normalizeTeamName(teamMeta?.name)
-    if (normalizedTeamName) {
-      empty.byName.set(normalizedTeamName, entry)
-    }
-
-    for (const player of normalizedPlayers) {
-      empty.leaders.push({
-        ...player,
-        teamId,
-        teamName: teamMeta?.name ?? teamId,
-        division: teamMeta?.division ?? teamMeta?.divisionName ?? null
-      })
-    }
-  }
-
-  empty.leaders.sort((a, b) => {
-    const ppgDiff = (b.ppg ?? 0) - (a.ppg ?? 0)
-    if (ppgDiff !== 0) return ppgDiff
-    const ptsDiff = (b.pts ?? 0) - (a.pts ?? 0)
-    if (ptsDiff !== 0) return ptsDiff
-    return (a.name || '').localeCompare(b.name || '')
-  })
-
-  return empty
-}
-
-function getPlayerStatsForTeam(index, teamId, selectedTeam) {
-  if (!index) {
-    return null
-  }
-
-  const idKey = teamId != null ? String(teamId) : null
-  if (idKey && index.byId.has(idKey)) {
-    return index.byId.get(idKey)
-  }
-
-  const candidateNames = [
-    selectedTeam?.name,
-    selectedTeam?.teamName,
-    selectedTeam?.team?.name,
-    selectedTeam?.team?.teamName
-  ]
-
-  for (const name of candidateNames) {
-    const normalized = normalizeTeamName(name)
-    if (normalized && index.byName.has(normalized)) {
-      return index.byName.get(normalized)
-    }
-  }
-
-  return null
-}
-
-function normalizeTeamName(name) {
-  if (typeof name !== 'string') {
-    return ''
-  }
-  return name
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase()
-}
-
-function toNumber(value) {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null
-  }
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
-
-function formatIntegerStat(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value.toLocaleString()
-  }
-  return '–'
-}
-
-function formatAverageStat(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value.toFixed(1)
-  }
-  return '–'
 }
