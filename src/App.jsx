@@ -218,10 +218,14 @@ function CompetitionSelectors({
   divisionLoading,
   divisionError,
   selectedDivisionId,
-  onDivisionChange
+  onDivisionChange,
+  variant = 'card'
 }) {
+  const containerClassName =
+    variant === 'header' ? 'selectors selectors--header' : 'card selectors-card'
+
   return (
-    <div className="card selectors-card">
+    <div className={containerClassName}>
       <div className="selector-grid">
         <label className="field">
           <span className="field-label">Competition</span>
@@ -1438,40 +1442,45 @@ export default function App() {
 
       <main className="container">
         <header className="page-header">
-          <h1>Live Scores</h1>
-          <p className="small muted">
-            Browse ladders, fixtures, and player stats for BasketballConnect competitions, or configure
-            your connection from the tabs above.
-          </p>
+          <div className="page-header__intro">
+            <h1>Live Scores</h1>
+            <p className="small muted">
+              Browse ladders, fixtures, and player stats for BasketballConnect competitions, or
+              configure your connection from the tabs above.
+            </p>
+          </div>
+
+          {hasValidConfig && (
+            <CompetitionSelectors
+              competitions={competitions}
+              competitionLoading={competitionLoading}
+              competitionError={competitionError}
+              selectedCompetitionId={selectedCompetitionId}
+              onCompetitionChange={setSelectedCompetitionId}
+              divisions={divisions}
+              divisionLoading={divisionLoading}
+              divisionError={divisionError}
+              selectedDivisionId={selectedDivisionId}
+              onDivisionChange={(divisionId) => {
+                setSelectedDivisionId(divisionId)
+                setSelectedTeamId(null)
+              }}
+              variant="header"
+            />
+          )}
         </header>
 
         {activeTab === 'settings' ? (
-        <SettingsView
-          organisationKey={organisationKeyInput}
-          onOrganisationKeyChange={setOrganisationKeyInput}
-          yearRefId={yearRefIdInput}
-          onYearRefIdChange={setYearRefIdInput}
-          hasValidConfig={hasValidConfig}
-          defaultCompetitionId={DEFAULT_COMPETITION_ID}
-        />
+          <SettingsView
+            organisationKey={organisationKeyInput}
+            onOrganisationKeyChange={setOrganisationKeyInput}
+            yearRefId={yearRefIdInput}
+            onYearRefIdChange={setYearRefIdInput}
+            hasValidConfig={hasValidConfig}
+            defaultCompetitionId={DEFAULT_COMPETITION_ID}
+          />
         ) : hasValidConfig ? (
           <div className="stack-lg">
-          <CompetitionSelectors
-            competitions={competitions}
-            competitionLoading={competitionLoading}
-            competitionError={competitionError}
-            selectedCompetitionId={selectedCompetitionId}
-            onCompetitionChange={setSelectedCompetitionId}
-            divisions={divisions}
-            divisionLoading={divisionLoading}
-            divisionError={divisionError}
-            selectedDivisionId={selectedDivisionId}
-            onDivisionChange={(divisionId) => {
-              setSelectedDivisionId(divisionId)
-              setSelectedTeamId(null)
-            }}
-          />
-
           {(activeTab === 'ladder' || activeTab === 'fixtures') && (
             <>
               {savedTeamsForCurrentSelection.length > 0 && (
