@@ -289,7 +289,9 @@ function LadderTable({
   onSelectTeam,
   selectedTeamId,
   savedTeams,
-  onToggleSaveTeam
+  onToggleSaveTeam,
+  selectedCompetitionId,
+  selectedDivisionId
 }) {
   if (loading) {
     return <LoadingMessage text="Loading ladder…" />
@@ -352,7 +354,12 @@ function LadderTable({
                       aria-pressed={isSaved}
                       onClick={(event) => {
                         event.stopPropagation()
-                        onToggleSaveTeam?.({ ...team, id: teamId })
+                        onToggleSaveTeam?.({
+                          ...team,
+                          id: teamId,
+                          competitionId: selectedCompetitionId,
+                          divisionId: selectedDivisionId
+                        })
                       }}
                     >
                       {isSaved ? '★ Saved' : '☆ Save'}
@@ -1084,24 +1091,26 @@ export default function App() {
       if (current.some((entry) => String(entry.id) === normalizedId)) {
         return current.filter((entry) => String(entry.id) !== normalizedId)
       }
-      return [...current, { id: normalizedId, name: teamName }]
+      return [
+        ...current,
+        {
+          id: normalizedId,
+          name: teamName,
+          competitionId:
+            team.competitionId != null
+              ? String(team.competitionId)
+              : selectedCompetitionId != null
+              ? String(selectedCompetitionId)
+              : undefined,
+          divisionId:
+            team.divisionId != null
+              ? Number(team.divisionId)
+              : selectedDivisionId != null
+              ? Number(selectedDivisionId)
+              : undefined
+        }
+      ]
     })
-  }
-
-  const handleSelectSavedTeam = (teamId) => {
-    if (teamId == null) {
-      setSelectedTeamId(null)
-      return
-    }
-    const normalizedId = String(teamId)
-    setSelectedTeamId(normalizedId)
-    setActiveTab('fixtures')
-  }
-
-  const handleRemoveSavedTeam = (teamId) => {
-    const normalizedId = teamId == null ? null : String(teamId)
-    setSavedTeams((current) => current.filter((entry) => String(entry.id) !== normalizedId))
-    setSelectedTeamId((current) => (String(current) === normalizedId ? null : current))
   }
 
   useEffect(() => {
@@ -1173,8 +1182,28 @@ export default function App() {
           {activeTab !== 'settings' && (
             <SavedTeamsView
               savedTeams={savedTeams}
-              onSelectTeam={handleSelectSavedTeam}
-              onRemoveTeam={handleRemoveSavedTeam}
+              onSelectTeam={(teamId) => {
+                const team = savedTeams.find((t) => String(t.id) === String(teamId))
+                if (!team) return
+
+                if (team.competitionId != null) {
+                  setSelectedCompetitionId(String(team.competitionId))
+                }
+                if (team.divisionId != null) {
+                  setSelectedDivisionId(Number(team.divisionId))
+                }
+
+                setSelectedTeamId(teamId == null ? null : String(teamId))
+                setActiveTab('fixtures')
+              }}
+              onRemoveTeam={(teamId) => {
+                const normalizedId = teamId == null ? null : String(teamId)
+                if (normalizedId == null) {
+                  return
+                }
+                setSavedTeams((prev) => prev.filter((t) => String(t.id) !== normalizedId))
+                setSelectedTeamId((current) => (String(current) === normalizedId ? null : current))
+              }}
             />
           )}
 
@@ -1194,6 +1223,8 @@ export default function App() {
                 selectedTeamId={selectedTeamId}
                 savedTeams={savedTeams}
                 onToggleSaveTeam={handleSaveTeam}
+                selectedCompetitionId={selectedCompetitionId}
+                selectedDivisionId={selectedDivisionId}
               />
             </div>
           ) : (
