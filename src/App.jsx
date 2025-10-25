@@ -1682,42 +1682,25 @@ export default function App() {
             )}
 
             {activeTab === 'ladder' ? (
-              <div className="ladder-fixtures-grid">
-                <div className="stack">
-                  <h2 className="section-title">Ladder</h2>
-                  <p className="small muted helper-text">
-                    Click or tap a team to highlight it and filter fixtures. Use the ☆ Save button to store
-                    favourites for quick access later.
-                  </p>
-                  <LadderTable
-                    ladderRows={ladderRows}
-                    loading={ladderLoading}
-                    error={ladderError}
-                    onSelectTeam={(teamId) =>
-                      setSelectedTeamId((current) =>
-                        String(current) === String(teamId) ? null : String(teamId)
-                      )
-                    }
-                    selectedTeamId={selectedTeamId}
-                    savedTeams={savedTeamsEnriched}
-                    onToggleSaveTeam={handleToggleSaveTeam}
-                  />
-                </div>
-                <div className="stack">
-                  <h2 className="section-title">Fixtures</h2>
-                  <FixturesView
-                    matches={roundFilteredMatches}
-                    loading={matchesLoading}
-                    error={matchesError}
-                    selectedTeamId={selectedTeamId}
-                    selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
-                    onClearTeam={() => setSelectedTeamId(null)}
-                    onOpenReview={(match) => {
-                      setReviewMatch(match)
-                      setActiveTab('review')
-                    }}
-                  />
-                </div>
+              <div className="stack">
+                <h2 className="section-title">Ladder</h2>
+                <p className="small muted helper-text">
+                  Click or tap a team to highlight it. Use the ☆ Save button to store favourites for quick
+                  access later.
+                </p>
+                <LadderTable
+                  ladderRows={ladderRows}
+                  loading={ladderLoading}
+                  error={ladderError}
+                  onSelectTeam={(teamId) =>
+                    setSelectedTeamId((current) =>
+                      String(current) === String(teamId) ? null : String(teamId)
+                    )
+                  }
+                  selectedTeamId={selectedTeamId}
+                  savedTeams={savedTeamsEnriched}
+                  onToggleSaveTeam={handleToggleSaveTeam}
+                />
               </div>
             ) : (
               <>
