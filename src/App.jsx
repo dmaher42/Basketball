@@ -4,6 +4,31 @@ const API_BASE = 'https://api-basketball.squadi.com/livescores'
 const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
 const IGNORE_STATUSES = encodeURIComponent(JSON.stringify([1]))
 
+const USE_PROXY = String(import.meta.env.VITE_USE_PROXY || '').toLowerCase() === 'true'
+
+const API = {
+  competitions: (orgKey, yearId) =>
+    USE_PROXY
+      ? `/api/bc/competitions?organisationUniqueKey=${orgKey}&yearRefId=${yearId}`
+      : `${API_BASE}/competitions/list?organisationUniqueKey=${orgKey}&yearRefId=${yearId}`,
+  divisions: (competitionId) =>
+    USE_PROXY
+      ? `/api/bc/divisions?competitionId=${competitionId}`
+      : `${API_BASE}/division?competitionId=${competitionId}`,
+  fixtures: (competitionId, divisionId, ignoreStatuses, teamIds = '') =>
+    USE_PROXY
+      ? `/api/bc/fixtures?competitionId=${competitionId}&divisionId=${divisionId}&ignoreStatuses=${ignoreStatuses}&teamIds=${teamIds}`
+      : `${API_BASE}/round/matches?competitionId=${competitionId}&divisionId=${divisionId}&ignoreStatuses=${ignoreStatuses}&teamIds=${teamIds}`,
+  ladderPrimary: (paramsQS) =>
+    USE_PROXY
+      ? `/api/bc/ladder?primary=1${paramsQS ? `&${paramsQS}` : ''}`
+      : `${LADDER_BASE_URL}?${paramsQS}`,
+  ladderFallback: (paramsQS) =>
+    USE_PROXY
+      ? `/api/bc/ladder?fallback=1${paramsQS ? `&${paramsQS}` : ''}`
+      : `${API_BASE}/teams/ladder/v2?${paramsQS}`
+}
+
 const ORG_KEY = import.meta.env.VITE_ORG_KEY
 const YEAR_REF_ID = Number(import.meta.env.VITE_YEAR_REF_ID)
 
@@ -378,9 +403,8 @@ export default function App() {
 
     async function fetchCompetitions() {
       try {
-        const response = await fetch(
-          `${API_BASE}/competitions/list?organisationUniqueKey=${organisationKey}&yearRefId=${yearRefId}`
-        )
+        const url = API.competitions(organisationKey, yearRefId)
+        const response = await fetch(url)
         if (!response.ok) {
           throw new Error(`Request failed with status ${response.status}`)
         }
@@ -428,7 +452,8 @@ export default function App() {
 
     async function fetchDivisions() {
       try {
-        const response = await fetch(`${API_BASE}/division?competitionId=${selectedCompetition.id}`)
+        const url = API.divisions(selectedCompetition.id)
+        const response = await fetch(url)
         if (!response.ok) {
           throw new Error(`Request failed with status ${response.status}`)
         }
@@ -501,13 +526,15 @@ export default function App() {
 
         let ladderData
         try {
-          ladderData = await requestLadder(`${LADDER_BASE_URL}?${ladderParams.toString()}`)
+          const primaryUrl = API.ladderPrimary(ladderParams.toString())
+          ladderData = await requestLadder(primaryUrl)
         } catch (ladderError) {
           const fallbackParams = new URLSearchParams({
             divisionIds: String(selectedDivisionId),
             competitionKey: selectedCompetition.uniqueKey
           })
-          ladderData = await requestLadder(`${API_BASE}/teams/ladder/v2?${fallbackParams.toString()}`)
+          const fallbackUrl = API.ladderFallback(fallbackParams.toString())
+          ladderData = await requestLadder(fallbackUrl)
         }
 
         if (!cancelled) {
@@ -542,7 +569,7 @@ export default function App() {
       setMatchesLoading(true)
       setMatchesError(null)
       try {
-        const url = `${API_BASE}/round/matches?competitionId=${selectedCompetition.id}&divisionId=${selectedDivisionId}&teamIds=&ignoreStatuses=${IGNORE_STATUSES}`
+        const url = API.fixtures(selectedCompetition.id, selectedDivisionId, IGNORE_STATUSES, '')
         const response = await fetch(url)
         if (!response.ok) {
           throw new Error(`Request failed with status ${response.status}`)
