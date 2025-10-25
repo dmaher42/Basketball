@@ -73,34 +73,30 @@ function MatchCard({ match, selectedTeamId }) {
     selectedTeamId != null && match.team2?.id != null && String(match.team2.id) === String(selectedTeamId)
   const score1 = typeof match.team1Score === 'number' ? match.team1Score : '–'
   const score2 = typeof match.team2Score === 'number' ? match.team2Score : '–'
-  const highlightStyle = {
-    fontWeight: 700,
-    color: '#111'
-  }
 
   return (
-    <li className="card" style={{ marginBottom: 12, padding: 16, listStyle: 'none' }}>
-      <div className="small muted" style={{ marginBottom: 4 }}>
+    <li className="card match-card">
+      <div className="small muted match-card__meta">
         {match.round?.name ? `${match.round.name} · ` : ''}{date} · {time}
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-        <div>
-          <div className="title" style={{ marginBottom: 4, ...(team1Selected ? highlightStyle : null) }}>
+      <div className="match-card__content">
+        <div className="match-card__teams">
+          <div className={`title ${team1Selected ? 'highlight-text' : ''}`}>
             {match.team1?.name ?? 'TBD'}
           </div>
-          <div className="title" style={team2Selected ? highlightStyle : null}>
+          <div className={`title ${team2Selected ? 'highlight-text' : ''}`}>
             {match.team2?.name ?? 'TBD'}
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className="title" style={{ fontWeight: 700 }}>{score1} – {score2}</div>
+        <div className="match-card__score">
+          <div className="title">{score1} – {score2}</div>
           {match.resultStatus && (
-            <div className="small muted" style={{ marginTop: 4 }}>{match.resultStatus}</div>
+            <div className="small muted">{match.resultStatus}</div>
           )}
         </div>
       </div>
       {match.venueCourt?.venue?.name && (
-        <div className="small muted" style={{ marginTop: 8 }}>
+        <div className="small muted match-card__venue">
           {match.venueCourt.venue.name}{match.venueCourt.name ? ` · ${match.venueCourt.name}` : ''}
         </div>
       )}
@@ -111,10 +107,7 @@ function MatchCard({ match, selectedTeamId }) {
 function ErrorCard({ message }) {
   if (!message) return null
   return (
-    <div
-      className="card"
-      style={{ padding: 16, marginBottom: 16, color: '#d00', background: '#fee', border: '1px solid #f99' }}
-    >
+    <div className="card card-error">
       <strong>Error:</strong> {message}
     </div>
   )
@@ -122,7 +115,7 @@ function ErrorCard({ message }) {
 
 function LoadingMessage({ text }) {
   if (!text) return null
-  return <p className="small muted" style={{ margin: '16px 0' }}>{text}</p>
+  return <p className="small muted loading-message">{text}</p>
 }
 
 function ConfigurationPanel({
@@ -133,15 +126,15 @@ function ConfigurationPanel({
   hasValidConfig
 }) {
   return (
-    <div className="card" style={{ padding: 16, display: 'grid', gap: 12 }}>
-      <div>
-        <h2 style={{ marginBottom: 4, fontSize: 18 }}>Connection settings</h2>
-        <p className="small muted" style={{ margin: 0 }}>
+    <div className="card stack settings-card">
+      <div className="stack-sm">
+        <h2 className="section-title">Connection settings</h2>
+        <p className="small muted">
           Provide your BasketballConnect organisation key and year reference ID to load live data.
         </p>
       </div>
       {!hasValidConfig && (
-        <p className="small" style={{ margin: 0, color: '#a00', fontWeight: 600 }}>
+        <p className="small field-help">
           Enter your BasketballConnect credentials or configure <code>.env</code> to access live data.
         </p>
       )}
@@ -177,7 +170,7 @@ function SettingsView({
   defaultCompetitionId
 }) {
   return (
-    <div style={{ display: 'grid', gap: 24 }}>
+    <div className="stack-lg">
       <ConfigurationPanel
         organisationKey={organisationKey}
         onOrganisationKeyChange={onOrganisationKeyChange}
@@ -187,9 +180,9 @@ function SettingsView({
       />
 
       {defaultCompetitionId && (
-        <div className="card" style={{ padding: 16, display: 'grid', gap: 8 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Default competition</h2>
-          <p className="small muted" style={{ margin: 0 }}>
+        <div className="card stack-sm">
+          <h2 className="section-title">Default competition</h2>
+          <p className="small muted">
             The app automatically focuses on competition <code>{defaultCompetitionId}</code> when
             a connection is available.
           </p>
@@ -201,15 +194,15 @@ function SettingsView({
 
 function ConfigurationRequired({ onOpenSettings }) {
   return (
-    <div className="card" style={{ padding: 24, display: 'grid', gap: 16 }}>
-      <div>
-        <h2 style={{ marginBottom: 8, fontSize: 20 }}>Connection required</h2>
-        <p className="small muted" style={{ margin: 0 }}>
+    <div className="card stack">
+      <div className="stack-sm">
+        <h2 className="section-title">Connection required</h2>
+        <p className="small muted">
           Enter a BasketballConnect organisation key and year reference ID to browse live ladders and
           fixtures.
         </p>
       </div>
-      <button className="btn btn-dark" style={{ justifySelf: 'start' }} onClick={onOpenSettings}>
+      <button className="btn btn-dark" onClick={onOpenSettings}>
         Open connection settings
       </button>
     </div>
@@ -229,7 +222,7 @@ function CompetitionSelectors({
   onDivisionChange
 }) {
   return (
-    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
+    <div className="card selectors-card">
       <div className="selector-grid">
         <label className="field">
           <span className="field-label">Competition</span>
@@ -305,19 +298,19 @@ function LadderTable({
   }
 
   return (
-    <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-      <table>
+    <div className="card table-card">
+      <table className="ladder-table">
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>#</th>
-            <th style={{ textAlign: 'left' }}>Team</th>
+            <th>#</th>
+            <th>Team</th>
             <th>P</th>
             <th>W</th>
             <th>L</th>
             <th>F</th>
             <th>A</th>
             <th>Pts</th>
-            <th style={{ textAlign: 'left' }}>Form</th>
+            <th>Form</th>
           </tr>
         </thead>
         <tbody>
@@ -328,30 +321,19 @@ function LadderTable({
             return (
               <tr
                 key={teamId ?? team.name}
-                className={isSelected ? 'highlight' : undefined}
-                style={{ cursor: 'pointer' }}
+                className={`clickable-row${isSelected ? ' highlight' : ''}`}
                 onClick={() => onSelectTeam(teamId)}
               >
                 <td>{team.rk ?? team.rank ?? team.position ?? '–'}</td>
                 <td>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: 12
-                    }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span className="title" style={{ fontWeight: 600 }}>{team.name ?? team.teamName ?? 'Unknown team'}</span>
-                      <span className="small muted">{team.divisionName ?? team.poolName ?? ''}</span>
+                  <div className="team-cell">
+                    <div className="team-details">
+                      <span className="title team-name">{team.name ?? team.teamName ?? 'Unknown team'}</span>
+                      <span className="small muted team-meta">{team.divisionName ?? team.poolName ?? ''}</span>
                     </div>
                     <button
-                      type="button"
-                      className="btn small"
-                      aria-pressed={isFavourite}
-                      title={isFavourite ? 'Remove from favourites' : 'Add to favourites'}
-                      aria-label={isFavourite ? 'Remove from favourites' : 'Add to favourites'}
+                      className={`btn small save-button${isSaved ? ' is-active' : ''}`}
+                      aria-pressed={isSaved}
                       onClick={(event) => {
                         event.stopPropagation()
                         onToggleFavourite?.(teamId)
@@ -421,17 +403,19 @@ function FixturesView({
   return (
     <div>
       {selectedTeamId && (
-        <div className="pill" style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          Viewing matches for <strong>{selectedTeamName}</strong>
-          <button className="btn" style={{ padding: '4px 8px' }} onClick={onClearTeam}>
-            Clear
-          </button>
+        <div className="pill fixtures-pill">
+          <span className="pill-actions">
+            Viewing matches for <strong>{selectedTeamName}</strong>
+            <button className="btn btn-ghost small" onClick={onClearTeam}>
+              Clear
+            </button>
+          </span>
         </div>
       )}
       {results.length > 0 && (
-        <section style={{ marginBottom: 24 }}>
-          <h2 style={{ fontSize: 18, margin: '0 0 8px' }}>Results</h2>
-          <ul style={{ padding: 0, margin: 0 }}>
+        <section className="section">
+          <h2 className="section-title">Results</h2>
+          <ul className="list-reset match-list">
             {results.map((match) => (
               <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
             ))}
@@ -439,9 +423,9 @@ function FixturesView({
         </section>
       )}
       {upcoming.length > 0 && (
-        <section>
-          <h2 style={{ fontSize: 18, margin: '0 0 8px' }}>Upcoming fixtures</h2>
-          <ul style={{ padding: 0, margin: 0 }}>
+        <section className="section">
+          <h2 className="section-title">Upcoming fixtures</h2>
+          <ul className="list-reset match-list">
             {upcoming.map((match) => (
               <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
             ))}
@@ -556,8 +540,8 @@ function StatsView({ organisationKey, yearRefId, selectedCompetition, selectedDi
 
   if (!isReady) {
     return (
-      <div className="card" style={{ padding: 16 }}>
-        <p style={{ margin: 0 }} className="small muted">
+      <div className="card card-soft">
+        <p className="small muted no-margin">
           Select a competition and division to view live stats.
         </p>
       </div>
@@ -580,37 +564,31 @@ function StatsView({ organisationKey, yearRefId, selectedCompetition, selectedDi
       : 'Unknown'
 
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <div className="card" style={{ padding: 16, display: 'grid', gap: 16 }}>
+    <div className="stack stats-panel">
+      <div className="card stack-lg">
         <div className="small muted">Last updated: {lastUpdatedText}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-          <div className="card" style={{ padding: 12 }}>
+        <div className="metric-grid">
+          <div className="card metric-card">
             <div className="small muted">Upcoming games</div>
-            <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
-              data.totals?.gamesUpcoming ?? '–'
-            }</div>
+            <div className="title">{data.totals?.gamesUpcoming ?? '–'}</div>
           </div>
-          <div className="card" style={{ padding: 12 }}>
+          <div className="card metric-card">
             <div className="small muted">Completed games</div>
-            <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
-              data.totals?.gamesCompleted ?? '–'
-            }</div>
+            <div className="title">{data.totals?.gamesCompleted ?? '–'}</div>
           </div>
-          <div className="card" style={{ padding: 12 }}>
+          <div className="card metric-card">
             <div className="small muted">Avg points (completed)</div>
-            <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
-              data.pointsAvg != null ? data.pointsAvg : '–'
-            }</div>
+            <div className="title">{data.pointsAvg != null ? data.pointsAvg : '–'}</div>
           </div>
         </div>
-        <div>
-          <h2 style={{ fontSize: 18, margin: '8px 0' }}>Leaders</h2>
+        <div className="stack-sm">
+          <h2 className="section-title">Leaders</h2>
           {leaders.length === 0 ? (
-            <p className="small muted" style={{ margin: 0 }}>
+            <p className="small muted no-margin">
               Leaderboard data is not currently available.
             </p>
           ) : (
-            <ol style={{ margin: 0, paddingLeft: 18 }}>
+            <ol className="leaders-list">
               {leaders.map((leader, index) => (
                 <li key={leader.id ?? leader.name ?? index}>
                   {leader.name || 'Unknown team'}{' '}
@@ -1096,20 +1074,14 @@ export default function App() {
   }, [availableRounds, selectedRoundName])
 
   return (
-    <div className="container" style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
-      <header style={{ marginBottom: 24 }}>
-        <h1 style={{ marginBottom: 8 }}>Live Scores</h1>
-        <p className="small muted">
-          Browse ladders and fixtures for BasketballConnect competitions, or configure your connection
-          from the tabs below.
-        </p>
-      </header>
-
-      <nav className="tabs" style={{ marginBottom: 24 }}>
+    <div>
+      <header className="brandbar">Hoops Hub</header>
+      <nav className="tabbar" aria-label="Primary">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             className={`btn ${activeTab === tab.id ? 'btn-dark' : ''}`}
+            type="button"
             onClick={() => setActiveTab(tab.id)}
           >
             {tab.label}
@@ -1117,7 +1089,16 @@ export default function App() {
         ))}
       </nav>
 
-      {activeTab === 'settings' ? (
+      <main className="container">
+        <header className="page-header">
+          <h1>Live Scores</h1>
+          <p className="small muted">
+            Browse ladders, fixtures, and player stats for BasketballConnect competitions, or configure
+            your connection from the tabs above.
+          </p>
+        </header>
+
+        {activeTab === 'settings' ? (
         <SettingsView
           organisationKey={organisationKeyInput}
           onOrganisationKeyChange={setOrganisationKeyInput}
@@ -1126,8 +1107,8 @@ export default function App() {
           hasValidConfig={hasValidConfig}
           defaultCompetitionId={DEFAULT_COMPETITION_ID}
         />
-      ) : hasValidConfig ? (
-        <>
+        ) : hasValidConfig ? (
+          <div className="stack-lg">
           <CompetitionSelectors
             competitions={competitions}
             competitionLoading={competitionLoading}
@@ -1242,8 +1223,8 @@ export default function App() {
 
           {activeTab === 'ladder' ? (
             <div>
-              <p className="small muted" style={{ marginBottom: 12 }}>
-                Click or tap a team to highlight it and filter fixtures. Use the ☆ button to mark
+              <p className="small muted helper-text">
+                Click or tap a team to highlight it and filter fixtures. Use the ☆ Save button to store
                 favourites for quick access later.
               </p>
               <LadderTable
@@ -1284,10 +1265,11 @@ export default function App() {
               selectedDivisionId={selectedDivisionId}
             />
           )}
-        </>
-      ) : (
-        <ConfigurationRequired onOpenSettings={() => setActiveTab('settings')} />
-      )}
+          </div>
+        ) : (
+          <ConfigurationRequired onOpenSettings={() => setActiveTab('settings')} />
+        )}
+      </main>
     </div>
   )
 }
@@ -1324,34 +1306,27 @@ function TeamSelector({ teams, selectedTeamId, onSelectTeam, favourites }) {
   }
 
   return (
-    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
-      <label className="field" style={{ marginBottom: 0 }}>
+    <div className="card team-selector">
+      <label className="field">
         <span className="field-label">Team</span>
         <select
           className="field-input"
           value={selectedTeamId ?? ''}
           onChange={(event) => {
-          const value = event.target.value
-          onSelectTeam(value === '' ? null : String(value))
-        }}
-      >
-        <option value="">All teams</option>
-        {favouriteTeamsSorted.length > 0 && (
-          <optgroup label="★ Favourites">
-            {favouriteTeamsSorted.map((team) => (
-              <option key={`fav-${team.id}`} value={team.id}>
-                {team.name}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        {otherTeams.map((team) => (
-          <option key={team.id} value={team.id}>
-            {team.name}
-          </option>
-        ))}
-      </select>
-        <span className="field-help">Use the dropdown or click a team in the ladder to focus their fixtures.</span>
+            const value = event.target.value
+            onSelectTeam(value === '' ? null : String(value))
+          }}
+        >
+          <option value="">All teams</option>
+          {sortedTeams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+        </select>
+        <span className="small muted field-description">
+          Use the dropdown or click a team in the ladder to focus their fixtures.
+        </span>
       </label>
     </div>
   )
@@ -1363,8 +1338,8 @@ function RoundSelector({ rounds, selectedRound, onSelectRound }) {
   }
 
   return (
-    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
-      <label className="field" style={{ marginBottom: 0 }}>
+    <div className="card round-selector">
+      <label className="field">
         <span className="field-label">Round</span>
         <select
           className="field-input"
@@ -1378,7 +1353,7 @@ function RoundSelector({ rounds, selectedRound, onSelectRound }) {
             </option>
           ))}
         </select>
-        <span className="field-help">Filter fixtures by round.</span>
+        <span className="small muted field-description">Filter fixtures by round.</span>
       </label>
     </div>
   )
