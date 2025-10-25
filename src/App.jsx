@@ -313,12 +313,18 @@ function CompetitionSelectors({
   variant = 'card'
 }) {
   const containerClassName =
-    variant === 'header' ? 'selectors selectors--header' : 'card selectors-card'
+    variant === 'header'
+      ? 'selectors selectors--header'
+      : variant === 'tabbar'
+        ? 'selectors selectors--tabbar'
+        : 'card selectors-card'
+
+  const fieldClassName = `field${variant === 'tabbar' ? ' field--inline' : ''}`
 
   return (
     <div className={containerClassName}>
       <div className="selector-grid">
-        <label className="field">
+        <label className={fieldClassName}>
           <span className="field-label">Competition</span>
           <select
             className="field-input"
@@ -348,7 +354,7 @@ function CompetitionSelectors({
           {competitionError && <span className="field-help">{competitionError}</span>}
         </label>
 
-        <label className="field">
+        <label className={fieldClassName}>
           <span className="field-label">Division</span>
           <select
             className="field-input"
@@ -1531,16 +1537,37 @@ export default function App() {
     <div>
       <header className="brandbar">Hoops Hub</header>
       <nav className="tabbar" aria-label="Primary">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            className={`btn ${activeTab === tab.id ? 'btn-dark' : ''}`}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
+        <div className="tabbar__buttons">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              className={`btn ${activeTab === tab.id ? 'btn-dark' : ''}`}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {hasValidConfig && (
+          <CompetitionSelectors
+            competitions={competitions}
+            competitionLoading={competitionLoading}
+            competitionError={competitionError}
+            selectedCompetitionId={selectedCompetitionId}
+            onCompetitionChange={setSelectedCompetitionId}
+            divisions={divisions}
+            divisionLoading={divisionLoading}
+            divisionError={divisionError}
+            selectedDivisionId={selectedDivisionId}
+            onDivisionChange={(divisionId) => {
+              setSelectedDivisionId(divisionId)
+              setSelectedTeamId(null)
+            }}
+            variant="tabbar"
+          />
+        )}
       </nav>
 
       <main className="container">
@@ -1552,25 +1579,6 @@ export default function App() {
               configure your connection from the tabs above.
             </p>
           </div>
-
-          {hasValidConfig && (
-            <CompetitionSelectors
-              competitions={competitions}
-              competitionLoading={competitionLoading}
-              competitionError={competitionError}
-              selectedCompetitionId={selectedCompetitionId}
-              onCompetitionChange={setSelectedCompetitionId}
-              divisions={divisions}
-              divisionLoading={divisionLoading}
-              divisionError={divisionError}
-              selectedDivisionId={selectedDivisionId}
-              onDivisionChange={(divisionId) => {
-                setSelectedDivisionId(divisionId)
-                setSelectedTeamId(null)
-              }}
-              variant="header"
-            />
-          )}
         </header>
 
         {activeTab === 'review' ? (
