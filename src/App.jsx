@@ -36,6 +36,7 @@ const DEFAULT_COMPETITION_ID = String(import.meta.env.VITE_COMPETITION_ID ?? '')
 const TABS = [
   { id: 'ladder', label: 'Ladder' },
   { id: 'fixtures', label: 'Fixtures' },
+  { id: 'stats', label: 'Stats' },
   { id: 'settings', label: 'Connection' }
 ]
 
@@ -385,6 +386,176 @@ function FixturesView({
           <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
         ))}
       </ul>
+    </div>
+  )
+}
+
+function StatsView({ organisationKey, yearRefId, selectedCompetition, selectedDivisionId }) {
+  const [data, setData] = React.useState(null)
+  const [error, setError] = React.useState(null)
+
+  const competitionId = selectedCompetition?.id
+  const competitionUniqueKey = selectedCompetition?.uniqueKey
+
+  const isReady =
+    organisationKey &&
+    yearRefId != null &&
+    competitionUniqueKey &&
+    selectedDivisionId != null
+
+  const fetchStats = React.useCallback(async () => {
+    if (!isReady) {
+      setData(null)
+      return
+    }
+
+    try {
+      setError(null)
+
+      const params = new URLSearchParams({
+        organisationKey,
+        yearId: String(yearRefId),
+        competitionUniqueKey,
+        divisionId: String(selectedDivisionId)
+      })
+      if (competitionId != null) {
+        params.set('competitionId', String(competitionId))
+      }
+
+      if (USE_PROXY) {
+        const response = await fetch(`/api/bc/stats?${params.toString()}`, { cache: 'no-store' })
+        const json = await response.json()
+        if (!response.ok || !json.ok) {
+          throw new Error(json.message || `Request failed with status ${response.status}`)
+        }
+        setData(json)
+        return
+      }
+
+      const ladderParams = new URLSearchParams({
+        organisationKey,
+        yearId: String(yearRefId),
+        includeRecentMatchData: 'true',
+        competitionUniqueKey,
+        divisionId: String(selectedDivisionId)
+      })
+      const ladderPrimaryUrl = `${LADDER_BASE_URL}?${ladderParams.toString()}`
+      const ladderFallbackUrl = `${API_BASE}/teams/ladder/v2?${new URLSearchParams({
+        divisionIds: String(selectedDivisionId),
+        competitionKey: competitionUniqueKey
+      }).toString()}`
+
+      const fixturesParams = new URLSearchParams()
+      if (competitionId != null) {
+        fixturesParams.set('competitionId', String(competitionId))
+      }
+      fixturesParams.set('divisionId', String(selectedDivisionId))
+      fixturesParams.set('ignoreStatuses', JSON.stringify([1]))
+      const fixturesUrl = `${API_BASE}/round/matches?${fixturesParams.toString()}`
+
+      let ladder = await fetchJsonNoStore(ladderPrimaryUrl)
+      if (!ladder.ok) {
+        ladder = await fetchJsonNoStore(ladderFallbackUrl)
+      }
+      if (!ladder.ok) {
+        throw new Error(ladder.data?.message || 'Failed to load ladder data')
+      }
+
+      const fixtures = await fetchJsonNoStore(fixturesUrl)
+      if (!fixtures.ok) {
+        throw new Error(fixtures.data?.message || 'Failed to load fixtures data')
+      }
+
+      const ladderRows = normalizeLadderRows(ladder.data)
+      const matches = normalizeFixturesForStats(fixtures.data)
+      const summary = computeStatsSummary(ladderRows, matches)
+      setData({ ok: true, ...summary })
+    } catch (fetchError) {
+      setError(fetchError?.message || 'Failed to load stats')
+    }
+  }, [competitionId, competitionUniqueKey, isReady, organisationKey, selectedDivisionId, yearRefId])
+
+  React.useEffect(() => {
+    if (!isReady) {
+      return
+    }
+    fetchStats()
+    const id = window.setInterval(fetchStats, 15000)
+    return () => window.clearInterval(id)
+  }, [fetchStats, isReady])
+
+  React.useEffect(() => {
+    if (!isReady) {
+      setError(null)
+      setData(null)
+    }
+  }, [isReady])
+
+  if (!isReady) {
+    return (
+      <div className="card" style={{ padding: 16 }}>
+        <p style={{ margin: 0 }} className="small muted">
+          Select a competition and division to view live stats.
+        </p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return <ErrorCard message={error} />
+  }
+
+  if (!data) {
+    return <LoadingMessage text="Loading stats…" />
+  }
+
+  const leaders = Array.isArray(data.leaders) ? data.leaders : []
+  const lastUpdatedDate = data.lastUpdated ? new Date(data.lastUpdated) : null
+  const lastUpdatedText =
+    lastUpdatedDate && !Number.isNaN(lastUpdatedDate.getTime())
+      ? lastUpdatedDate.toLocaleString()
+      : 'Unknown'
+
+  return (
+    <div className="card" style={{ padding: 16, display: 'grid', gap: 16 }}>
+      <div className="small muted">Last updated: {lastUpdatedText}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+        <div className="card" style={{ padding: 12 }}>
+          <div className="small muted">Upcoming games</div>
+          <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
+            data.totals?.gamesUpcoming ?? '–'
+          }</div>
+        </div>
+        <div className="card" style={{ padding: 12 }}>
+          <div className="small muted">Completed games</div>
+          <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
+            data.totals?.gamesCompleted ?? '–'
+          }</div>
+        </div>
+        <div className="card" style={{ padding: 12 }}>
+          <div className="small muted">Avg points (completed)</div>
+          <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
+            data.pointsAvg != null ? data.pointsAvg : '–'
+          }</div>
+        </div>
+      </div>
+      <div>
+        <h2 style={{ fontSize: 18, margin: '8px 0' }}>Leaders</h2>
+        {leaders.length === 0 ? (
+          <p className="small muted" style={{ margin: 0 }}>
+            Leaderboard data is not currently available.
+          </p>
+        ) : (
+          <ol style={{ margin: 0, paddingLeft: 18 }}>
+            {leaders.map((leader, index) => (
+              <li key={leader.id ?? leader.name ?? index}>
+                {leader.name || 'Unknown team'}{' '}
+                {leader.rank != null ? `(rank ${leader.rank})` : ''}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </div>
   )
 }
@@ -805,13 +976,15 @@ export default function App() {
             }}
           />
 
-          <TeamSelector
-            teams={ladderRows}
-            selectedTeamId={selectedTeamId}
-            onSelectTeam={(value) => setSelectedTeamId(value || null)}
-          />
+          {(activeTab === 'ladder' || activeTab === 'fixtures') && (
+            <TeamSelector
+              teams={ladderRows}
+              selectedTeamId={selectedTeamId}
+              onSelectTeam={(value) => setSelectedTeamId(value || null)}
+            />
+          )}
 
-          {activeTab === 'ladder' ? (
+          {activeTab === 'ladder' && (
             <div>
               <p className="small muted" style={{ marginBottom: 12 }}>
                 Click or tap a team to highlight it and filter fixtures.
@@ -826,7 +999,9 @@ export default function App() {
                 selectedTeamId={selectedTeamId}
               />
             </div>
-          ) : (
+          )}
+
+          {activeTab === 'fixtures' && (
             <FixturesView
               matches={filteredMatches}
               loading={matchesLoading}
@@ -834,6 +1009,15 @@ export default function App() {
               selectedTeamId={selectedTeamId}
               selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
               onClearTeam={() => setSelectedTeamId(null)}
+            />
+          )}
+
+          {activeTab === 'stats' && (
+            <StatsView
+              organisationKey={organisationKey}
+              yearRefId={yearRefId}
+              selectedCompetition={selectedCompetition}
+              selectedDivisionId={selectedDivisionId}
             />
           )}
         </>
@@ -926,4 +1110,103 @@ function normalizeRecentResults(ladderData) {
   }
 
   return []
+}
+
+async function fetchJsonNoStore(url) {
+  try {
+    const response = await fetch(url, { cache: 'no-store' })
+    const text = await response.text()
+    let data = {}
+    if (text) {
+      try {
+        data = JSON.parse(text)
+      } catch (error) {
+        data = { message: text }
+      }
+    }
+    return { ok: response.ok, status: response.status, data }
+  } catch (error) {
+    return { ok: false, status: 0, data: { message: error?.message || 'Network error' } }
+  }
+}
+
+function normalizeFixturesForStats(fixturesData) {
+  const rounds = Array.isArray(fixturesData?.rounds) ? fixturesData.rounds : []
+  return rounds.flatMap((round) =>
+    (round.matches || []).map((match) => ({
+      ...match,
+      startTime: match.startTime || match.originalStartTime || null,
+      team1Score: typeof match.team1Score === 'number' ? match.team1Score : null,
+      team2Score: typeof match.team2Score === 'number' ? match.team2Score : null
+    }))
+  )
+}
+
+function computeLeadersForStats(ladderRows, matches) {
+  const sorted = [...ladderRows]
+    .filter((team) => team.name)
+    .sort((a, b) => (a.rk ?? a.rank ?? a.position ?? Number.POSITIVE_INFINITY) - (b.rk ?? b.rank ?? b.position ?? Number.POSITIVE_INFINITY))
+    .slice(0, 3)
+    .map((team) => ({ id: team.id, name: team.name, rank: team.rk ?? team.rank ?? team.position ?? null }))
+
+  if (sorted.length > 0) {
+    return sorted
+  }
+
+  const fallbackTeams = ladderRows.filter((team) => team.name).slice(0, 3)
+  if (fallbackTeams.length > 0) {
+    return fallbackTeams.map((team) => ({ id: team.id, name: team.name, rank: null }))
+  }
+
+  const seen = new Set()
+  const names = []
+  for (const match of matches) {
+    for (const name of [match.team1?.name, match.team2?.name]) {
+      if (!name || seen.has(name)) {
+        continue
+      }
+      seen.add(name)
+      names.push(name)
+      if (names.length === 3) {
+        break
+      }
+    }
+    if (names.length === 3) {
+      break
+    }
+  }
+
+  return names.map((name) => ({ id: name, name, rank: null }))
+}
+
+function computeStatsSummary(ladderRows, matches) {
+  const now = Date.now()
+  let completed = 0
+  let upcoming = 0
+  let totalPoints = 0
+  let gamesWithPoints = 0
+
+  for (const match of matches) {
+    const hasScores = match.team1Score != null && match.team2Score != null
+    const startTime = match.startTime ? Date.parse(match.startTime) : NaN
+    if (hasScores) {
+      completed += 1
+      totalPoints += match.team1Score + match.team2Score
+      gamesWithPoints += 1
+    } else if (!Number.isNaN(startTime) && startTime > now) {
+      upcoming += 1
+    }
+  }
+
+  const leaders = computeLeadersForStats(ladderRows, matches)
+
+  return {
+    lastUpdated: new Date().toISOString(),
+    totals: {
+      gamesUpcoming: upcoming,
+      gamesCompleted: completed
+    },
+    leaders,
+    pointsAvg: gamesWithPoints > 0 ? +(totalPoints / gamesWithPoints).toFixed(2) : null
+  }
 }
