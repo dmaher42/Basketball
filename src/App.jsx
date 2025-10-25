@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import SavedTeamsView from './components/SavedTeamsView'
 import TopScorersView from './components/TopScorersView'
+import useFavouriteTeams from './hooks/useFavouriteTeams'
 
 const API_BASE = 'https://api-basketball.squadi.com/livescores'
 const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
@@ -281,10 +282,8 @@ function LadderTable({
   error,
   onSelectTeam,
   selectedTeamId,
-  savedTeams,
-  onToggleSaveTeam,
-  selectedCompetitionId,
-  selectedDivisionId
+  isFavouriteTeam,
+  onToggleFavourite
 }) {
   if (loading) {
     return <LoadingMessage text="Loading ladder…" />
@@ -318,9 +317,7 @@ function LadderTable({
           {ladderRows.map((team) => {
             const teamId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
             const isSelected = selectedTeamId != null && String(selectedTeamId) === String(teamId)
-            const isSaved = savedTeams?.some(
-              (saved) => String(saved.id) === String(teamId)
-            )
+            const isFavourite = isFavouriteTeam?.(teamId)
             return (
               <tr
                 key={teamId ?? team.name}
@@ -339,15 +336,10 @@ function LadderTable({
                       aria-pressed={isSaved}
                       onClick={(event) => {
                         event.stopPropagation()
-                        onToggleSaveTeam?.({
-                          ...team,
-                          id: teamId,
-                          competitionId: selectedCompetitionId,
-                          divisionId: selectedDivisionId
-                        })
+                        onToggleFavourite?.(teamId)
                       }}
                     >
-                      {isSaved ? '★ Saved' : '☆ Save'}
+                      {isFavourite ? '★' : '☆'}
                     </button>
                   </div>
                 </td>
@@ -674,29 +666,8 @@ export default function App() {
   const [matchesLoading, setMatchesLoading] = useState(false)
   const [matchesError, setMatchesError] = useState(null)
 
-  const [savedTeams, setSavedTeams] = useState(() => {
-    if (typeof window === 'undefined') return []
-    try {
-      const stored = window.localStorage.getItem('hoopsHub.savedTeams')
-      if (!stored) return []
-      const parsed = JSON.parse(stored)
-      return Array.isArray(parsed) ? parsed : []
-    } catch (error) {
-      console.warn('Failed to parse saved teams from storage', error)
-      return []
-    }
-  })
   const [selectedTeamId, setSelectedTeamId] = useState(null)
   const [selectedRoundName, setSelectedRoundName] = useState('')
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      window.localStorage.setItem('hoopsHub.savedTeams', JSON.stringify(savedTeams))
-    } catch (error) {
-      console.warn('Failed to persist saved teams', error)
-    }
-  }, [savedTeams])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -810,6 +781,12 @@ export default function App() {
       }) || null
     )
   }, [competitions, selectedCompetitionId])
+
+  const { favourites, isFavourite, toggleFavourite, setFavourite } = useFavouriteTeams({
+    orgKey: organisationKey,
+    competitionId: selectedCompetition?.id ?? '',
+    divisionId: selectedDivisionId ?? ''
+  })
 
   useEffect(() => {
     if (!selectedCompetition) {
@@ -1059,40 +1036,33 @@ export default function App() {
     )
   }, [filteredMatches, selectedRoundName])
 
-  const handleSaveTeam = (team) => {
-    if (!team) return
-    const teamId =
-      team.id ?? team.teamId ?? team.teamUniqueKey ?? team.team?.id ?? team.teamName ?? null
-    if (teamId == null) {
-      return
+  const favouriteTeamDetails = useMemo(() => {
+    if (!Array.isArray(favourites) || favourites.length === 0) {
+      return []
     }
-    const normalizedId = String(teamId)
-    const teamName = team.name ?? team.teamName ?? team.team?.name ?? 'Unknown team'
-    setSavedTeams((current) => {
-      if (current.some((entry) => String(entry.id) === normalizedId)) {
-        return current.filter((entry) => String(entry.id) !== normalizedId)
+
+    const teamMap = new Map(
+      ladderRows.map((team) => {
+        const teamId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
+        return [String(teamId), team]
+      })
+    )
+
+    return favourites.map((teamId) => {
+      const normalisedId = String(teamId)
+      const team = teamMap.get(normalisedId)
+      const name =
+        team?.name ?? team?.teamName ?? team?.team?.name ?? `Team ${normalisedId}`
+      return {
+        id: normalisedId,
+        name,
+        competitionId:
+          selectedCompetitionId != null ? String(selectedCompetitionId) : undefined,
+        divisionId:
+          selectedDivisionId != null ? Number(selectedDivisionId) : undefined
       }
-      return [
-        ...current,
-        {
-          id: normalizedId,
-          name: teamName,
-          competitionId:
-            team.competitionId != null
-              ? String(team.competitionId)
-              : selectedCompetitionId != null
-              ? String(selectedCompetitionId)
-              : undefined,
-          divisionId:
-            team.divisionId != null
-              ? Number(team.divisionId)
-              : selectedDivisionId != null
-              ? Number(selectedDivisionId)
-              : undefined
-        }
-      ]
     })
-  }
+  }, [favourites, ladderRows, selectedCompetitionId, selectedDivisionId])
 
   useEffect(() => {
     if (!selectedRoundName) {
@@ -1156,18 +1126,76 @@ export default function App() {
           />
 
           {(activeTab === 'ladder' || activeTab === 'fixtures') && (
-            <TeamSelector
-              teams={ladderRows}
-              selectedTeamId={selectedTeamId}
-              onSelectTeam={(value) => setSelectedTeamId(value || null)}
-            />
+            <>
+              {favouriteTeamDetails.length > 0 && (
+                <div
+                  className="card"
+                  style={{
+                    padding: 12,
+                    marginBottom: 16,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 8,
+                      flexWrap: 'wrap'
+                    }}
+                  >
+                    <span className="small muted">Favourites</span>
+                    <button
+                      type="button"
+                      className="btn small"
+                      onClick={() => setSelectedTeamId(null)}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {favouriteTeamDetails.map((team) => {
+                      const isSelected =
+                        selectedTeamId != null &&
+                        String(selectedTeamId) === String(team.id)
+                      return (
+                        <button
+                          key={team.id}
+                          type="button"
+                          className="pill"
+                          style={{
+                            cursor: 'pointer',
+                            background: isSelected ? '#111' : undefined,
+                            color: isSelected ? '#fff' : undefined
+                          }}
+                          onClick={() => setSelectedTeamId(String(team.id))}
+                        >
+                          {team.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              <TeamSelector
+                teams={ladderRows}
+                selectedTeamId={selectedTeamId}
+                onSelectTeam={(value) => setSelectedTeamId(value || null)}
+                favourites={favourites}
+              />
+            </>
           )}
 
           {activeTab !== 'settings' && (
             <SavedTeamsView
-              savedTeams={savedTeams}
+              savedTeams={favouriteTeamDetails}
               onSelectTeam={(teamId) => {
-                const team = savedTeams.find((t) => String(t.id) === String(teamId))
+                const team = favouriteTeamDetails.find(
+                  (t) => String(t.id) === String(teamId)
+                )
                 if (!team) return
 
                 if (team.competitionId != null) {
@@ -1185,8 +1213,10 @@ export default function App() {
                 if (normalizedId == null) {
                   return
                 }
-                setSavedTeams((prev) => prev.filter((t) => String(t.id) !== normalizedId))
-                setSelectedTeamId((current) => (String(current) === normalizedId ? null : current))
+                setFavourite(normalizedId, false)
+                setSelectedTeamId((current) =>
+                  String(current) === normalizedId ? null : current
+                )
               }}
             />
           )}
@@ -1205,10 +1235,8 @@ export default function App() {
                   setSelectedTeamId((current) => (String(current) === String(teamId) ? null : String(teamId)))
                 }
                 selectedTeamId={selectedTeamId}
-                savedTeams={savedTeams}
-                onToggleSaveTeam={handleSaveTeam}
-                selectedCompetitionId={selectedCompetitionId}
-                selectedDivisionId={selectedDivisionId}
+                isFavouriteTeam={isFavourite}
+                onToggleFavourite={toggleFavourite}
               />
             </div>
           ) : (
@@ -1246,7 +1274,7 @@ export default function App() {
   )
 }
 
-function TeamSelector({ teams, selectedTeamId, onSelectTeam }) {
+function TeamSelector({ teams, selectedTeamId, onSelectTeam, favourites }) {
   const sortedTeams = useMemo(() => {
     return [...(teams || [])]
       .map((team) => ({
@@ -1256,6 +1284,22 @@ function TeamSelector({ teams, selectedTeamId, onSelectTeam }) {
       .filter((team) => team.id != null && team.name)
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [teams])
+
+  const { favouriteTeamsSorted, otherTeams } = useMemo(() => {
+    const favouriteIds = new Set((favourites || []).map((value) => String(value)))
+    if (favouriteIds.size === 0) {
+      return { favouriteTeamsSorted: [], otherTeams: sortedTeams }
+    }
+
+    const favouriteTeamsSorted = sortedTeams.filter((team) =>
+      favouriteIds.has(String(team.id))
+    )
+    const otherTeams = sortedTeams.filter(
+      (team) => !favouriteIds.has(String(team.id))
+    )
+
+    return { favouriteTeamsSorted, otherTeams }
+  }, [favourites, sortedTeams])
 
   if (sortedTeams.length === 0) {
     return null

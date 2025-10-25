@@ -7,6 +7,13 @@ A focused Vite + React app for browsing live ladders and fixtures from Basketbal
 2. Install dependencies: `npm install`
 3. Start the dev server: `npm run dev`
 
+## Usage
+
+### Favourites
+- Click the star next to a team in the ladder to add or remove it from your favourites.
+- Favourite selections are stored per division in your browser so they remain after refreshing.
+- When favourites exist, use the favourites bar or the dropdown’s ★ Favourites section to jump to those teams.
+
 ## Configuration
 1. Copy `.env.example` to `.env`.
 2. Provide your BasketballConnect details:
