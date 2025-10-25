@@ -83,7 +83,9 @@ a {
   top: var(--brandbar-height);
   z-index: 30;
   display: flex;
+  align-items: center;
   gap: var(--space-xs);
+  flex-wrap: wrap;
   padding: var(--space-xs) var(--space-lg);
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(14px);
@@ -94,6 +96,16 @@ a {
   flex: 0 0 auto;
   border-radius: 999px;
   font-size: var(--font-size-sm);
+}
+
+.tabbar__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.tabbar .selectors--tabbar {
+  margin-left: auto;
 }
 
 .container {
@@ -141,6 +153,25 @@ a {
   .selectors--header {
     padding: var(--space-md) var(--space-lg);
   }
+}
+
+.selectors--tabbar {
+  width: auto;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.selectors--tabbar .selector-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.selectors--tabbar .field {
+  flex: 0 1 auto;
 }
 
 .card {
@@ -249,6 +280,17 @@ a {
   display: flex;
   flex-direction: column;
   gap: var(--space-2xs);
+}
+
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.field--inline .field-label {
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
 }
 
 .field-label {
