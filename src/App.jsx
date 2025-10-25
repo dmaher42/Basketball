@@ -329,9 +329,31 @@ function LadderTable({
               >
                 <td>{team.rk ?? team.rank ?? team.position ?? '–'}</td>
                 <td>
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span className="title" style={{ fontWeight: 600 }}>{team.name ?? team.teamName ?? 'Unknown team'}</span>
-                    <span className="small muted">{team.divisionName ?? team.poolName ?? ''}</span>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 12
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span className="title" style={{ fontWeight: 600 }}>{team.name ?? team.teamName ?? 'Unknown team'}</span>
+                      <span className="small muted">{team.divisionName ?? team.poolName ?? ''}</span>
+                    </div>
+                    <button
+                      className="btn small"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        if (String(selectedTeamId) === String(teamId)) {
+                          onSelectTeam(null)
+                        } else {
+                          onSelectTeam(String(teamId))
+                        }
+                      }}
+                    >
+                      {String(selectedTeamId) === String(teamId) ? '★ Saved' : '☆ Save'}
+                    </button>
                   </div>
                 </td>
                 <td>{team.P ?? team.played ?? team.playedGames ?? '–'}</td>
@@ -665,6 +687,23 @@ export default function App() {
   const [selectedRoundName, setSelectedRoundName] = useState('')
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    const storedTeamId = window.localStorage.getItem('hoopsHub.selectedTeamId')
+    if (storedTeamId) {
+      setSelectedTeamId(storedTeamId)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (selectedTeamId != null) {
+      window.localStorage.setItem('hoopsHub.selectedTeamId', String(selectedTeamId))
+    } else {
+      window.localStorage.removeItem('hoopsHub.selectedTeamId')
+    }
+  }, [selectedTeamId])
+
+  useEffect(() => {
     setCompetitions([])
     setSelectedCompetitionId(null)
     setDivisions([])
@@ -869,11 +908,24 @@ export default function App() {
               : []
 
           setLadderState({ rows, lastResults, nextResults })
-          setSelectedTeamId((current) =>
-            rows.some((team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(current))
-              ? current
-              : null
-          )
+          setSelectedTeamId((current) => {
+            const matchesCurrent =
+              current != null &&
+              rows.some((team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(current))
+            if (matchesCurrent) {
+              return current
+            }
+            if (typeof window !== 'undefined') {
+              const storedTeamId = window.localStorage.getItem('hoopsHub.selectedTeamId')
+              if (
+                storedTeamId &&
+                rows.some((team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(storedTeamId))
+              ) {
+                return storedTeamId
+              }
+            }
+            return null
+          })
         }
       } catch (error) {
         if (!cancelled) {
