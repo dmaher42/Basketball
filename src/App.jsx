@@ -31,10 +31,12 @@ const API = {
 
 const ORG_KEY = import.meta.env.VITE_ORG_KEY
 const YEAR_REF_ID = Number(import.meta.env.VITE_YEAR_REF_ID)
+const DEFAULT_COMPETITION_ID = String(import.meta.env.VITE_COMPETITION_ID ?? '').trim()
 
 const TABS = [
   { id: 'ladder', label: 'Ladder' },
-  { id: 'fixtures', label: 'Fixtures' }
+  { id: 'fixtures', label: 'Fixtures' },
+  { id: 'settings', label: 'Connection' }
 ]
 
 function formatDateTime(isoString) {
@@ -127,7 +129,7 @@ function ConfigurationPanel({
   hasValidConfig
 }) {
   return (
-    <div className="card" style={{ padding: 16, marginBottom: 24, display: 'grid', gap: 12 }}>
+    <div className="card" style={{ padding: 16, display: 'grid', gap: 12 }}>
       <div>
         <h2 style={{ marginBottom: 4, fontSize: 18 }}>Connection settings</h2>
         <p className="small muted" style={{ margin: 0 }}>
@@ -162,6 +164,54 @@ function ConfigurationPanel({
   )
 }
 
+function SettingsView({
+  organisationKey,
+  onOrganisationKeyChange,
+  yearRefId,
+  onYearRefIdChange,
+  hasValidConfig,
+  defaultCompetitionId
+}) {
+  return (
+    <div style={{ display: 'grid', gap: 24 }}>
+      <ConfigurationPanel
+        organisationKey={organisationKey}
+        onOrganisationKeyChange={onOrganisationKeyChange}
+        yearRefId={yearRefId}
+        onYearRefIdChange={onYearRefIdChange}
+        hasValidConfig={hasValidConfig}
+      />
+
+      {defaultCompetitionId && (
+        <div className="card" style={{ padding: 16, display: 'grid', gap: 8 }}>
+          <h2 style={{ margin: 0, fontSize: 18 }}>Default competition</h2>
+          <p className="small muted" style={{ margin: 0 }}>
+            The app automatically focuses on competition <code>{defaultCompetitionId}</code> when
+            a connection is available.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ConfigurationRequired({ onOpenSettings }) {
+  return (
+    <div className="card" style={{ padding: 24, display: 'grid', gap: 16 }}>
+      <div>
+        <h2 style={{ marginBottom: 8, fontSize: 20 }}>Connection required</h2>
+        <p className="small muted" style={{ margin: 0 }}>
+          Enter a BasketballConnect organisation key and year reference ID to browse live ladders and
+          fixtures.
+        </p>
+      </div>
+      <button className="btn btn-dark" style={{ justifySelf: 'start' }} onClick={onOpenSettings}>
+        Open connection settings
+      </button>
+    </div>
+  )
+}
+
 function CompetitionSelectors({
   competitions,
   competitionLoading,
@@ -182,12 +232,24 @@ function CompetitionSelectors({
           <select
             className="field-input"
             value={selectedCompetitionId ?? ''}
-            onChange={(event) => onCompetitionChange(Number(event.target.value))}
+            onChange={(event) => {
+              const value = event.target.value
+              onCompetitionChange(value === '' ? null : value)
+            }}
             disabled={competitionLoading || competitions.length === 0}
           >
             {competitions.length === 0 && <option value="">{competitionLoading ? 'Loading…' : 'No competitions'}</option>}
             {competitions.map((competition) => (
-              <option key={competition.id} value={competition.id}>
+              <option
+                key={competition.id ?? competition.uniqueKey ?? competition.name}
+                value={
+                  competition.id != null
+                    ? String(competition.id)
+                    : competition.uniqueKey != null
+                      ? String(competition.uniqueKey)
+                      : ''
+                }
+              >
                 {competition.longName || competition.name}
               </option>
             ))}
@@ -328,7 +390,10 @@ function FixturesView({
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('ladder')
+  const [activeTab, setActiveTab] = useState(() => {
+    const hasEnvConfig = (ORG_KEY ?? '').toString().trim() !== '' && Number.isFinite(YEAR_REF_ID)
+    return hasEnvConfig ? 'ladder' : 'settings'
+  })
 
   const [organisationKeyInput, setOrganisationKeyInput] = useState(() => (ORG_KEY ?? '').trim())
   const [yearRefIdInput, setYearRefIdInput] = useState(() =>
@@ -393,7 +458,9 @@ export default function App() {
   useEffect(() => {
     if (!hasValidConfig) {
       setCompetitionLoading(false)
-      setCompetitionError('Enter a BasketballConnect organisation key and year reference ID to continue.')
+      setCompetitionError(
+        'Open the Connection tab to enter your BasketballConnect organisation key and year reference ID.'
+      )
       return
     }
 
@@ -412,7 +479,32 @@ export default function App() {
         if (!cancelled) {
           setCompetitions(Array.isArray(data) ? data : [])
           if (Array.isArray(data) && data.length > 0) {
-            setSelectedCompetitionId(data[0].id)
+            const defaultIdentifier = DEFAULT_COMPETITION_ID.toLowerCase()
+            const preferredCompetition =
+              defaultIdentifier !== ''
+                ? data.find((competition) => {
+                    const identifiers = [
+                      competition.id,
+                      competition.uniqueKey,
+                      competition.competitionId,
+                      competition.competitionUniqueKey
+                    ]
+                    return identifiers.some((value) => {
+                      if (value == null) return false
+                      return String(value).trim().toLowerCase() === defaultIdentifier
+                    })
+                  })
+                : null
+            const fallbackCompetition = preferredCompetition ?? data[0]
+            const initialCompetitionIdentifier =
+              fallbackCompetition?.id ??
+              fallbackCompetition?.uniqueKey ??
+              fallbackCompetition?.competitionId ??
+              fallbackCompetition?.competitionUniqueKey ??
+              null
+            setSelectedCompetitionId(
+              initialCompetitionIdentifier != null ? String(initialCompetitionIdentifier) : null
+            )
           }
         }
       } catch (error) {
@@ -433,10 +525,23 @@ export default function App() {
     }
   }, [organisationKey, yearRefId, hasValidConfig])
 
-  const selectedCompetition = useMemo(
-    () => competitions.find((competition) => competition.id === selectedCompetitionId) || null,
-    [competitions, selectedCompetitionId]
-  )
+  const selectedCompetition = useMemo(() => {
+    if (selectedCompetitionId == null) {
+      return null
+    }
+    const normalizedId = String(selectedCompetitionId)
+    return (
+      competitions.find((competition) => {
+        const identifiers = [
+          competition.id,
+          competition.uniqueKey,
+          competition.competitionId,
+          competition.competitionUniqueKey
+        ]
+        return identifiers.some((value) => value != null && String(value) === normalizedId)
+      }) || null
+    )
+  }, [competitions, selectedCompetitionId])
 
   useEffect(() => {
     if (!selectedCompetition) {
@@ -655,38 +760,11 @@ export default function App() {
     <div className="container" style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
       <header style={{ marginBottom: 24 }}>
         <h1 style={{ marginBottom: 8 }}>Live Scores</h1>
-        <p className="small muted">Browse ladders and fixtures for BasketballConnect competitions.</p>
+        <p className="small muted">
+          Browse ladders and fixtures for BasketballConnect competitions, or configure your connection
+          from the tabs below.
+        </p>
       </header>
-
-      <ConfigurationPanel
-        organisationKey={organisationKeyInput}
-        onOrganisationKeyChange={setOrganisationKeyInput}
-        yearRefId={yearRefIdInput}
-        onYearRefIdChange={setYearRefIdInput}
-        hasValidConfig={hasValidConfig}
-      />
-
-      <CompetitionSelectors
-        competitions={competitions}
-        competitionLoading={competitionLoading}
-        competitionError={competitionError}
-        selectedCompetitionId={selectedCompetitionId}
-        onCompetitionChange={setSelectedCompetitionId}
-        divisions={divisions}
-        divisionLoading={divisionLoading}
-        divisionError={divisionError}
-        selectedDivisionId={selectedDivisionId}
-        onDivisionChange={(divisionId) => {
-          setSelectedDivisionId(divisionId)
-          setSelectedTeamId(null)
-        }}
-      />
-
-      <TeamSelector
-        teams={ladderRows}
-        selectedTeamId={selectedTeamId}
-        onSelectTeam={(value) => setSelectedTeamId(value || null)}
-      />
 
       <nav className="tabs" style={{ marginBottom: 24 }}>
         {TABS.map((tab) => (
@@ -700,32 +778,67 @@ export default function App() {
         ))}
       </nav>
 
-      {activeTab === 'ladder' && (
-        <div>
-          <p className="small muted" style={{ marginBottom: 12 }}>
-            Click or tap a team to highlight it and filter fixtures.
-          </p>
-          <LadderTable
-            ladderRows={ladderRows}
-            loading={ladderLoading}
-            error={ladderError}
-            onSelectTeam={(teamId) =>
-              setSelectedTeamId((current) => (String(current) === String(teamId) ? null : String(teamId)))
-            }
-            selectedTeamId={selectedTeamId}
-          />
-        </div>
-      )}
-
-      {activeTab === 'fixtures' && (
-        <FixturesView
-          matches={filteredMatches}
-          loading={matchesLoading}
-          error={matchesError}
-          selectedTeamId={selectedTeamId}
-          selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
-          onClearTeam={() => setSelectedTeamId(null)}
+      {activeTab === 'settings' ? (
+        <SettingsView
+          organisationKey={organisationKeyInput}
+          onOrganisationKeyChange={setOrganisationKeyInput}
+          yearRefId={yearRefIdInput}
+          onYearRefIdChange={setYearRefIdInput}
+          hasValidConfig={hasValidConfig}
+          defaultCompetitionId={DEFAULT_COMPETITION_ID}
         />
+      ) : hasValidConfig ? (
+        <>
+          <CompetitionSelectors
+            competitions={competitions}
+            competitionLoading={competitionLoading}
+            competitionError={competitionError}
+            selectedCompetitionId={selectedCompetitionId}
+            onCompetitionChange={setSelectedCompetitionId}
+            divisions={divisions}
+            divisionLoading={divisionLoading}
+            divisionError={divisionError}
+            selectedDivisionId={selectedDivisionId}
+            onDivisionChange={(divisionId) => {
+              setSelectedDivisionId(divisionId)
+              setSelectedTeamId(null)
+            }}
+          />
+
+          <TeamSelector
+            teams={ladderRows}
+            selectedTeamId={selectedTeamId}
+            onSelectTeam={(value) => setSelectedTeamId(value || null)}
+          />
+
+          {activeTab === 'ladder' ? (
+            <div>
+              <p className="small muted" style={{ marginBottom: 12 }}>
+                Click or tap a team to highlight it and filter fixtures.
+              </p>
+              <LadderTable
+                ladderRows={ladderRows}
+                loading={ladderLoading}
+                error={ladderError}
+                onSelectTeam={(teamId) =>
+                  setSelectedTeamId((current) => (String(current) === String(teamId) ? null : String(teamId)))
+                }
+                selectedTeamId={selectedTeamId}
+              />
+            </div>
+          ) : (
+            <FixturesView
+              matches={filteredMatches}
+              loading={matchesLoading}
+              error={matchesError}
+              selectedTeamId={selectedTeamId}
+              selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
+              onClearTeam={() => setSelectedTeamId(null)}
+            />
+          )}
+        </>
+      ) : (
+        <ConfigurationRequired onOpenSettings={() => setActiveTab('settings')} />
       )}
     </div>
   )

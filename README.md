@@ -11,12 +11,13 @@ A focused Vite + React app for browsing live ladders and fixtures from Basketbal
 1. Copy `.env.example` to `.env`.
 2. Provide your BasketballConnect details:
    - `VITE_ORG_KEY` – organisation key
+   - `VITE_COMPETITION_ID` – competition identifier (numeric ID or unique key)
    - `VITE_YEAR_REF_ID` – year reference ID (numeric)
    - `VITE_USE_PROXY` – optional. Set to `true` to route calls through the built-in proxy (default `false`).
 
 If you do not have these values during development, you can still interact with the app by entering
-them in the “Connection settings” panel rendered on the page. The values are stored locally in the
-browser and reused on subsequent visits.
+them on the **Connection** tab in the app. The values are stored locally in the browser and reused on
+subsequent visits.
 
 ### Troubleshooting (CORS)
 If you encounter CORS errors in the browser or your network blocks the BasketballConnect APIs, set
