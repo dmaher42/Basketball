@@ -1095,11 +1095,7 @@ export default function App() {
     }
     const normalizedId = String(teamId)
     setSelectedTeamId(normalizedId)
-    setActiveTab((current) => {
-      if (current === 'settings') return 'ladder'
-      if (current === 'stats') return 'fixtures'
-      return current
-    })
+    setActiveTab('fixtures')
   }
 
   const handleRemoveSavedTeam = (teamId) => {
