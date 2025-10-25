@@ -1051,7 +1051,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'ladder' && (
+          {activeTab === 'ladder' ? (
             <div>
               <p className="small muted" style={{ marginBottom: 12 }}>
                 Click or tap a team to highlight it and filter fixtures.
