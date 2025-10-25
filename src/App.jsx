@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import TopScorersView from './components/TopScorersView'
 
 const API_BASE = 'https://api-basketball.squadi.com/livescores'
 const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
@@ -552,45 +553,54 @@ function StatsView({ organisationKey, yearRefId, selectedCompetition, selectedDi
       : 'Unknown'
 
   return (
-    <div className="card" style={{ padding: 16, display: 'grid', gap: 16 }}>
-      <div className="small muted">Last updated: {lastUpdatedText}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-        <div className="card" style={{ padding: 12 }}>
-          <div className="small muted">Upcoming games</div>
-          <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
-            data.totals?.gamesUpcoming ?? '–'
-          }</div>
+    <div style={{ display: 'grid', gap: 16 }}>
+      <div className="card" style={{ padding: 16, display: 'grid', gap: 16 }}>
+        <div className="small muted">Last updated: {lastUpdatedText}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
+          <div className="card" style={{ padding: 12 }}>
+            <div className="small muted">Upcoming games</div>
+            <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
+              data.totals?.gamesUpcoming ?? '–'
+            }</div>
+          </div>
+          <div className="card" style={{ padding: 12 }}>
+            <div className="small muted">Completed games</div>
+            <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
+              data.totals?.gamesCompleted ?? '–'
+            }</div>
+          </div>
+          <div className="card" style={{ padding: 12 }}>
+            <div className="small muted">Avg points (completed)</div>
+            <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
+              data.pointsAvg != null ? data.pointsAvg : '–'
+            }</div>
+          </div>
         </div>
-        <div className="card" style={{ padding: 12 }}>
-          <div className="small muted">Completed games</div>
-          <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
-            data.totals?.gamesCompleted ?? '–'
-          }</div>
-        </div>
-        <div className="card" style={{ padding: 12 }}>
-          <div className="small muted">Avg points (completed)</div>
-          <div className="title" style={{ fontWeight: 700, fontSize: 24 }}>{
-            data.pointsAvg != null ? data.pointsAvg : '–'
-          }</div>
+        <div>
+          <h2 style={{ fontSize: 18, margin: '8px 0' }}>Leaders</h2>
+          {leaders.length === 0 ? (
+            <p className="small muted" style={{ margin: 0 }}>
+              Leaderboard data is not currently available.
+            </p>
+          ) : (
+            <ol style={{ margin: 0, paddingLeft: 18 }}>
+              {leaders.map((leader, index) => (
+                <li key={leader.id ?? leader.name ?? index}>
+                  {leader.name || 'Unknown team'}{' '}
+                  {leader.rank != null ? `(rank ${leader.rank})` : ''}
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       </div>
-      <div>
-        <h2 style={{ fontSize: 18, margin: '8px 0' }}>Leaders</h2>
-        {leaders.length === 0 ? (
-          <p className="small muted" style={{ margin: 0 }}>
-            Leaderboard data is not currently available.
-          </p>
-        ) : (
-          <ol style={{ margin: 0, paddingLeft: 18 }}>
-            {leaders.map((leader, index) => (
-              <li key={leader.id ?? leader.name ?? index}>
-                {leader.name || 'Unknown team'}{' '}
-                {leader.rank != null ? `(rank ${leader.rank})` : ''}
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
+
+      <TopScorersView
+        organisationKey={organisationKey}
+        yearRefId={yearRefId}
+        selectedCompetition={selectedCompetition}
+        selectedDivisionId={selectedDivisionId}
+      />
     </div>
   )
 }
