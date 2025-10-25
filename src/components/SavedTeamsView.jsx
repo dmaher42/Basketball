@@ -1,6 +1,6 @@
 import React from 'react'
 
-export default function SavedTeamsView({ savedTeams, onSelectTeam, onRemoveTeam }) {
+export default function SavedTeamsView({ savedTeams, onSelectSavedTeam, onRemoveTeam }) {
   if (!savedTeams || savedTeams.length === 0) {
     return (
       <div className="card" style={{ padding: 16 }}>
@@ -28,10 +28,16 @@ export default function SavedTeamsView({ savedTeams, onSelectTeam, onRemoveTeam 
               justifyContent: 'space-between'
             }}
           >
-            <span className="title" style={{ fontWeight: 600 }}>{team.name}</span>
+            <span>
+              <span className="title" style={{ fontWeight: 600 }}>{team.name}</span>
+              <span className="small muted" style={{ marginLeft: 8 }}>
+                {team.competitionName ? `· ${team.competitionName}` : ''}
+                {team.divisionName ? ` · ${team.divisionName}` : ''}
+              </span>
+            </span>
             <span style={{ display: 'flex', gap: 8 }}>
-              <button className="btn small" onClick={() => onSelectTeam?.(team.id)}>
-                View team
+              <button className="btn small" onClick={() => onSelectSavedTeam?.(team)}>
+                Open
               </button>
               <button className="btn small" onClick={() => onRemoveTeam?.(team.id)}>
                 Remove
