@@ -488,6 +488,18 @@ tr.highlight .team-name {
   font-size: var(--font-size-lg);
 }
 
+.ladder-fixtures-grid {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+@media (min-width: 1024px) {
+  .ladder-fixtures-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+
 .stack {
   display: grid;
   gap: var(--space-md);
@@ -542,7 +554,6 @@ tr.highlight .team-name {
 }
 
 .round-selector,
-.team-selector,
 .selectors-card {
   margin-bottom: var(--space-xl);
 }

@@ -310,7 +310,8 @@ function CompetitionSelectors({
   divisionError,
   selectedDivisionId,
   onDivisionChange,
-  variant = 'card'
+  variant = 'card',
+  children
 }) {
   const containerClassName =
     variant === 'header'
@@ -371,6 +372,7 @@ function CompetitionSelectors({
           </select>
           {divisionError && <span className="field-help">{divisionError}</span>}
         </label>
+        {children}
       </div>
     </div>
   )
@@ -1333,10 +1335,49 @@ export default function App() {
     selectedDivisionId
   ])
 
-  const savedTeamIdsForCurrentSelection = useMemo(
-    () => savedTeamsForCurrentSelection.map((team) => String(team.id)),
-    [savedTeamsForCurrentSelection]
-  )
+  const ladderTeamOptions = useMemo(() => {
+    return (ladderRows || [])
+      .map((team) => {
+        const id = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
+        if (id == null) {
+          return null
+        }
+        const name =
+          team.name ?? team.teamName ?? team.team?.name ?? team.team?.teamName ?? `Team ${id}`
+        if (!name) {
+          return null
+        }
+        return { id: String(id), name }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [ladderRows])
+
+  const favouriteTeamOptions = useMemo(() => {
+    return savedTeamsForCurrentSelection
+      .map((team) => {
+        if (!team) return null
+        const teamId = team.id != null ? String(team.id) : null
+        if (!teamId || !ladderTeamMap.has(teamId)) {
+          return null
+        }
+        const ladderTeam = ladderTeamMap.get(teamId)
+        const name =
+          ladderTeam?.name ??
+          ladderTeam?.teamName ??
+          ladderTeam?.team?.name ??
+          team.name ??
+          team.teamName ??
+          null
+        if (!name) {
+          return null
+        }
+        return { id: teamId, name }
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [ladderTeamMap, savedTeamsForCurrentSelection])
+
 
   function normalizeTeamRecord(teamLike, extras = {}) {
     if (!teamLike) {
@@ -1549,25 +1590,6 @@ export default function App() {
             </button>
           ))}
         </div>
-
-        {hasValidConfig && (
-          <CompetitionSelectors
-            competitions={competitions}
-            competitionLoading={competitionLoading}
-            competitionError={competitionError}
-            selectedCompetitionId={selectedCompetitionId}
-            onCompetitionChange={setSelectedCompetitionId}
-            divisions={divisions}
-            divisionLoading={divisionLoading}
-            divisionError={divisionError}
-            selectedDivisionId={selectedDivisionId}
-            onDivisionChange={(divisionId) => {
-              setSelectedDivisionId(divisionId)
-              setSelectedTeamId(null)
-            }}
-            variant="tabbar"
-          />
-        )}
       </nav>
 
       <main className="container">
@@ -1579,6 +1601,57 @@ export default function App() {
               configure your connection from the tabs above.
             </p>
           </div>
+          {hasValidConfig && (
+            <CompetitionSelectors
+              competitions={competitions}
+              competitionLoading={competitionLoading}
+              competitionError={competitionError}
+              selectedCompetitionId={selectedCompetitionId}
+              onCompetitionChange={setSelectedCompetitionId}
+              divisions={divisions}
+              divisionLoading={divisionLoading}
+              divisionError={divisionError}
+              selectedDivisionId={selectedDivisionId}
+              onDivisionChange={(divisionId) => {
+                setSelectedDivisionId(divisionId)
+                setSelectedTeamId(null)
+              }}
+              variant="header"
+            >
+              <label className="field">
+                <span className="field-label">Team</span>
+                <select
+                  className="field-input"
+                  value={selectedTeamId ?? ''}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setSelectedTeamId(value === '' ? null : value)
+                  }}
+                  disabled={ladderLoading || ladderTeamOptions.length === 0}
+                >
+                  <option value="">All teams</option>
+                  {favouriteTeamOptions.length > 0 && (
+                    <optgroup label="★ Favourites">
+                      {favouriteTeamOptions.map((team) => (
+                        <option key={`fav-${team.id}`} value={team.id}>
+                          {team.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {ladderTeamOptions.length > 0 && (
+                    <optgroup label="All teams">
+                      {ladderTeamOptions.map((team) => (
+                        <option key={team.id} value={team.id}>
+                          {team.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </label>
+            </CompetitionSelectors>
+          )}
         </header>
 
         {activeTab === 'review' ? (
@@ -1600,187 +1673,87 @@ export default function App() {
           />
         ) : hasValidConfig ? (
           <div className="stack-lg">
-          {(activeTab === 'ladder' || activeTab === 'fixtures') && (
-            <>
-              {savedTeamsForCurrentSelection.length > 0 && (
-                <div
-                  className="card"
-                  style={{
-                    padding: 12,
-                    marginBottom: 16,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: 8,
-                      flexWrap: 'wrap'
-                    }}
-                  >
-                    <span className="small muted">Favourites</span>
-                    <button
-                      type="button"
-                      className="btn small"
-                      onClick={() => setSelectedTeamId(null)}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {savedTeamsForCurrentSelection.map((team) => {
-                      const isSelected =
-                        selectedTeamId != null &&
-                        String(selectedTeamId) === String(team.id)
-                      return (
-                        <button
-                          key={team.id}
-                          type="button"
-                          className="pill"
-                          style={{
-                            cursor: 'pointer',
-                            background: isSelected ? '#111' : undefined,
-                            color: isSelected ? '#fff' : undefined
-                          }}
-                          onClick={() => setSelectedTeamId(String(team.id))}
-                        >
-                          {team.name}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-              <TeamSelector
-                teams={ladderRows}
-                selectedTeamId={selectedTeamId}
-                onSelectTeam={(value) => setSelectedTeamId(value || null)}
-                favourites={savedTeamIdsForCurrentSelection}
-              />
-
+            {(activeTab === 'ladder' || activeTab === 'fixtures') && (
               <SavedTeamsView
                 savedTeams={savedTeamsEnriched}
                 onSelectSavedTeam={handleSelectSavedTeam}
                 onRemoveTeam={handleRemoveSavedTeam}
               />
-            </>
-          )}
+            )}
 
-          {activeTab === 'ladder' ? (
-            <div>
-              <p className="small muted helper-text">
-                Click or tap a team to highlight it and filter fixtures. Use the ☆ Save button to store
-                favourites for quick access later.
-              </p>
-              <LadderTable
-                ladderRows={ladderRows}
-                loading={ladderLoading}
-                error={ladderError}
-                onSelectTeam={(teamId) =>
-                  setSelectedTeamId((current) => (String(current) === String(teamId) ? null : String(teamId)))
-                }
-                selectedTeamId={selectedTeamId}
-                savedTeams={savedTeamsEnriched}
-                onToggleSaveTeam={handleToggleSaveTeam}
-              />
-            </div>
-          ) : (
-            <>
-              <RoundSelector
-                rounds={availableRounds}
-                selectedRound={selectedRoundName}
-                onSelectRound={setSelectedRoundName}
-              />
-              <FixturesView
-                matches={roundFilteredMatches}
-                loading={matchesLoading}
-                error={matchesError}
-                selectedTeamId={selectedTeamId}
-                selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
-                onClearTeam={() => setSelectedTeamId(null)}
-                onOpenReview={(match) => {
-                  setReviewMatch(match)
-                  setActiveTab('review')
-                }}
-              />
-            </>
-          )}
+            {activeTab === 'ladder' ? (
+              <div className="ladder-fixtures-grid">
+                <div className="stack">
+                  <h2 className="section-title">Ladder</h2>
+                  <p className="small muted helper-text">
+                    Click or tap a team to highlight it and filter fixtures. Use the ☆ Save button to store
+                    favourites for quick access later.
+                  </p>
+                  <LadderTable
+                    ladderRows={ladderRows}
+                    loading={ladderLoading}
+                    error={ladderError}
+                    onSelectTeam={(teamId) =>
+                      setSelectedTeamId((current) =>
+                        String(current) === String(teamId) ? null : String(teamId)
+                      )
+                    }
+                    selectedTeamId={selectedTeamId}
+                    savedTeams={savedTeamsEnriched}
+                    onToggleSaveTeam={handleToggleSaveTeam}
+                  />
+                </div>
+                <div className="stack">
+                  <h2 className="section-title">Fixtures</h2>
+                  <FixturesView
+                    matches={roundFilteredMatches}
+                    loading={matchesLoading}
+                    error={matchesError}
+                    selectedTeamId={selectedTeamId}
+                    selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
+                    onClearTeam={() => setSelectedTeamId(null)}
+                    onOpenReview={(match) => {
+                      setReviewMatch(match)
+                      setActiveTab('review')
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <>
+                <RoundSelector
+                  rounds={availableRounds}
+                  selectedRound={selectedRoundName}
+                  onSelectRound={setSelectedRoundName}
+                />
+                <FixturesView
+                  matches={roundFilteredMatches}
+                  loading={matchesLoading}
+                  error={matchesError}
+                  selectedTeamId={selectedTeamId}
+                  selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
+                  onClearTeam={() => setSelectedTeamId(null)}
+                  onOpenReview={(match) => {
+                    setReviewMatch(match)
+                    setActiveTab('review')
+                  }}
+                />
+              </>
+            )}
 
-          {activeTab === 'stats' && (
-            <StatsView
-              organisationKey={organisationKey}
-              yearRefId={yearRefId}
-              selectedCompetition={selectedCompetition}
-              selectedDivisionId={selectedDivisionId}
-            />
-          )}
+            {activeTab === 'stats' && (
+              <StatsView
+                organisationKey={organisationKey}
+                yearRefId={yearRefId}
+                selectedCompetition={selectedCompetition}
+                selectedDivisionId={selectedDivisionId}
+              />
+            )}
           </div>
         ) : (
           <ConfigurationRequired onOpenSettings={() => setActiveTab('settings')} />
         )}
       </main>
-    </div>
-  )
-}
-
-function TeamSelector({ teams, selectedTeamId, onSelectTeam, favourites }) {
-  const sortedTeams = useMemo(() => {
-    return [...(teams || [])]
-      .map((team) => ({
-        id: team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName,
-        name: team.name ?? team.teamName ?? team.team?.name ?? 'Unknown team'
-      }))
-      .filter((team) => team.id != null && team.name)
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }, [teams])
-
-  const { favouriteTeamsSorted, otherTeams } = useMemo(() => {
-    const favouriteIds = new Set((favourites || []).map((value) => String(value)))
-    if (favouriteIds.size === 0) {
-      return { favouriteTeamsSorted: [], otherTeams: sortedTeams }
-    }
-
-    const favouriteTeamsSorted = sortedTeams.filter((team) =>
-      favouriteIds.has(String(team.id))
-    )
-    const otherTeams = sortedTeams.filter(
-      (team) => !favouriteIds.has(String(team.id))
-    )
-
-    return { favouriteTeamsSorted, otherTeams }
-  }, [favourites, sortedTeams])
-
-  if (sortedTeams.length === 0) {
-    return null
-  }
-
-  return (
-    <div className="card team-selector">
-      <label className="field">
-        <span className="field-label">Team</span>
-        <select
-          className="field-input"
-          value={selectedTeamId ?? ''}
-          onChange={(event) => {
-            const value = event.target.value
-            onSelectTeam(value === '' ? null : String(value))
-          }}
-        >
-          <option value="">All teams</option>
-          {sortedTeams.map((team) => (
-            <option key={team.id} value={team.id}>
-              {team.name}
-            </option>
-          ))}
-        </select>
-        <span className="small muted field-description">
-          Use the dropdown or click a team in the ladder to focus their fixtures.
-        </span>
-      </label>
     </div>
   )
 }
