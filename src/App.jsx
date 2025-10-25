@@ -64,7 +64,7 @@ function formatDateTime(isoString) {
   }
 }
 
-function MatchCard({ match, selectedTeamId }) {
+function MatchCard({ match, selectedTeamId, onOpenReview }) {
   const { date, time } = formatDateTime(match.startTime || match.originalStartTime)
   const team1Selected =
     selectedTeamId != null && match.team1?.id != null && String(match.team1.id) === String(selectedTeamId)
@@ -72,9 +72,32 @@ function MatchCard({ match, selectedTeamId }) {
     selectedTeamId != null && match.team2?.id != null && String(match.team2.id) === String(selectedTeamId)
   const score1 = typeof match.team1Score === 'number' ? match.team1Score : '–'
   const score2 = typeof match.team2Score === 'number' ? match.team2Score : '–'
+  const isCompleted = typeof match.team1Score === 'number' && typeof match.team2Score === 'number'
+
+  const handleClick = () => {
+    if (!isCompleted) {
+      return
+    }
+    onOpenReview?.(match)
+  }
 
   return (
-    <li className="card match-card">
+    <li
+      className={`card match-card${isCompleted ? ' clickable-row' : ''}`}
+      onClick={isCompleted ? handleClick : undefined}
+      role={isCompleted ? 'button' : undefined}
+      tabIndex={isCompleted ? 0 : undefined}
+      onKeyDown={
+        isCompleted
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ' || event.key === 'Space') {
+                event.preventDefault()
+                handleClick()
+              }
+            }
+          : undefined
+      }
+    >
       <div className="small muted match-card__meta">
         {match.round?.name ? `${match.round.name} · ` : ''}{date} · {time}
       </div>
@@ -100,6 +123,74 @@ function MatchCard({ match, selectedTeamId }) {
         </div>
       )}
     </li>
+  )
+}
+
+function MatchReview({ match, onBack }) {
+  if (!match) {
+    return (
+      <div className="card">
+        <p className="small muted no-margin">No match selected.</p>
+      </div>
+    )
+  }
+
+  const { date, time } = formatDateTime(match.startTime || match.originalStartTime)
+  const team1Name = match.team1?.name ?? 'Team 1'
+  const team2Name = match.team2?.name ?? 'Team 2'
+  const score1 = typeof match.team1Score === 'number' ? match.team1Score : '–'
+  const score2 = typeof match.team2Score === 'number' ? match.team2Score : '–'
+  const winner =
+    typeof score1 === 'number' && typeof score2 === 'number'
+      ? score1 === score2
+        ? 'Draw'
+        : score1 > score2
+          ? team1Name
+          : team2Name
+      : null
+  const margin =
+    typeof score1 === 'number' && typeof score2 === 'number' ? Math.abs(score1 - score2) : null
+
+  return (
+    <div className="stack">
+      <div className="card stack">
+        <div className="small muted">
+          {match.round?.name ? `${match.round.name} · ` : ''}
+          {date} · {time}
+        </div>
+        <div className="title">
+          {team1Name} {score1} – {score2} {team2Name}
+        </div>
+        {match.resultStatus && <div className="small muted">{match.resultStatus}</div>}
+        {match.venueCourt?.venue?.name && (
+          <div className="small muted">
+            {match.venueCourt.venue.name}
+            {match.venueCourt.name ? ` · ${match.venueCourt.name}` : ''}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 className="section-title">Summary</h3>
+        <ul className="list-reset">
+          <li>
+            <strong>Status:</strong> {match.resultStatus || 'Completed'}
+          </li>
+          <li>
+            <strong>Winner:</strong> {winner || '—'}
+          </li>
+          <li>
+            <strong>Margin:</strong> {margin != null ? `${margin} pts` : '—'}
+          </li>
+        </ul>
+      </div>
+
+      <div>
+        <button className="btn" onClick={onBack}>
+          ← Back to Fixtures
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -373,7 +464,8 @@ function FixturesView({
   error,
   selectedTeamId,
   selectedTeamName,
-  onClearTeam
+  onClearTeam,
+  onOpenReview
 }) {
   if (loading) {
     return <LoadingMessage text="Loading fixtures…" />
@@ -423,7 +515,12 @@ function FixturesView({
           <h2 className="section-title">Results</h2>
           <ul className="list-reset match-list">
             {results.map((match) => (
-              <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
+              <MatchCard
+                key={match.id}
+                match={match}
+                selectedTeamId={selectedTeamId}
+                onOpenReview={onOpenReview}
+              />
             ))}
           </ul>
         </section>
@@ -433,7 +530,12 @@ function FixturesView({
           <h2 className="section-title">Upcoming fixtures</h2>
           <ul className="list-reset match-list">
             {upcoming.map((match) => (
-              <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
+              <MatchCard
+                key={match.id}
+                match={match}
+                selectedTeamId={selectedTeamId}
+                onOpenReview={onOpenReview}
+              />
             ))}
           </ul>
         </section>
@@ -621,6 +723,7 @@ export default function App() {
     const hasEnvConfig = (ORG_KEY ?? '').toString().trim() !== '' && Number.isFinite(YEAR_REF_ID)
     return hasEnvConfig ? 'ladder' : 'settings'
   })
+  const [reviewMatch, setReviewMatch] = useState(null)
 
   const [organisationKeyInput, setOrganisationKeyInput] = useState(() => (ORG_KEY ?? '').trim())
   const [yearRefIdInput, setYearRefIdInput] = useState(() =>
@@ -1470,7 +1573,15 @@ export default function App() {
           )}
         </header>
 
-        {activeTab === 'settings' ? (
+        {activeTab === 'review' ? (
+          <MatchReview
+            match={reviewMatch}
+            onBack={() => {
+              setActiveTab('fixtures')
+              setReviewMatch(null)
+            }}
+          />
+        ) : activeTab === 'settings' ? (
           <SettingsView
             organisationKey={organisationKeyInput}
             onOrganisationKeyChange={setOrganisationKeyInput}
@@ -1583,6 +1694,10 @@ export default function App() {
                 selectedTeamId={selectedTeamId}
                 selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
                 onClearTeam={() => setSelectedTeamId(null)}
+                onOpenReview={(match) => {
+                  setReviewMatch(match)
+                  setActiveTab('review')
+                }}
               />
             </>
           )}
