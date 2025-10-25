@@ -370,6 +370,25 @@ function FixturesView({
     return <p>No fixtures available.</p>
   }
 
+  const isCompleted = (match) =>
+    typeof match.team1Score === 'number' && typeof match.team2Score === 'number'
+
+  const now = Date.now()
+  const isUpcoming = (match) => {
+    if (isCompleted(match)) {
+      return false
+    }
+    const timestamp = match.startTime || match.originalStartTime
+    const parsed = timestamp ? Date.parse(timestamp) : NaN
+    if (Number.isNaN(parsed)) {
+      return true
+    }
+    return parsed >= now
+  }
+
+  const results = matches.filter(isCompleted)
+  const upcoming = matches.filter(isUpcoming)
+
   return (
     <div>
       {selectedTeamId && (
@@ -380,11 +399,27 @@ function FixturesView({
           </button>
         </div>
       )}
-      <ul style={{ padding: 0, margin: 0 }}>
-        {matches.map((match) => (
-          <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
-        ))}
-      </ul>
+      {results.length > 0 && (
+        <section style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 18, margin: '0 0 8px' }}>Results</h2>
+          <ul style={{ padding: 0, margin: 0 }}>
+            {results.map((match) => (
+              <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
+            ))}
+          </ul>
+        </section>
+      )}
+      {upcoming.length > 0 && (
+        <section>
+          <h2 style={{ fontSize: 18, margin: '0 0 8px' }}>Upcoming fixtures</h2>
+          <ul style={{ padding: 0, margin: 0 }}>
+            {upcoming.map((match) => (
+              <MatchCard key={match.id} match={match} selectedTeamId={selectedTeamId} />
+            ))}
+          </ul>
+        </section>
+      )}
+      {results.length === 0 && upcoming.length === 0 && <p>No matches in this round.</p>}
     </div>
   )
 }
@@ -446,6 +481,7 @@ export default function App() {
   const [matchesError, setMatchesError] = useState(null)
 
   const [selectedTeamId, setSelectedTeamId] = useState(null)
+  const [selectedRoundName, setSelectedRoundName] = useState('')
 
   useEffect(() => {
     setCompetitions([])
@@ -756,6 +792,37 @@ export default function App() {
     })
   }, [matches, selectedTeamId])
 
+  const availableRounds = useMemo(() => {
+    const names = new Set()
+    for (const match of filteredMatches || []) {
+      const name = match.round?.name?.trim()
+      if (name) {
+        names.add(name)
+      }
+    }
+    return Array.from(names).sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+    )
+  }, [filteredMatches])
+
+  const roundFilteredMatches = useMemo(() => {
+    if (!selectedRoundName) {
+      return filteredMatches
+    }
+    return (filteredMatches || []).filter(
+      (match) => (match.round?.name || '').trim() === selectedRoundName
+    )
+  }, [filteredMatches, selectedRoundName])
+
+  useEffect(() => {
+    if (!selectedRoundName) {
+      return
+    }
+    if (!availableRounds.includes(selectedRoundName)) {
+      setSelectedRoundName('')
+    }
+  }, [availableRounds, selectedRoundName])
+
   return (
     <div className="container" style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
       <header style={{ marginBottom: 24 }}>
@@ -827,14 +894,21 @@ export default function App() {
               />
             </div>
           ) : (
-            <FixturesView
-              matches={filteredMatches}
-              loading={matchesLoading}
-              error={matchesError}
-              selectedTeamId={selectedTeamId}
-              selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
-              onClearTeam={() => setSelectedTeamId(null)}
-            />
+            <>
+              <RoundSelector
+                rounds={availableRounds}
+                selectedRound={selectedRoundName}
+                onSelectRound={setSelectedRoundName}
+              />
+              <FixturesView
+                matches={roundFilteredMatches}
+                loading={matchesLoading}
+                error={matchesError}
+                selectedTeamId={selectedTeamId}
+                selectedTeamName={selectedTeam?.name ?? selectedTeam?.teamName}
+                onClearTeam={() => setSelectedTeamId(null)}
+              />
+            </>
           )}
         </>
       ) : (
@@ -879,6 +953,33 @@ function TeamSelector({ teams, selectedTeamId, onSelectTeam }) {
           ))}
         </select>
         <span className="field-help">Use the dropdown or click a team in the ladder to focus their fixtures.</span>
+      </label>
+    </div>
+  )
+}
+
+function RoundSelector({ rounds, selectedRound, onSelectRound }) {
+  if (!rounds || rounds.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 24 }}>
+      <label className="field" style={{ marginBottom: 0 }}>
+        <span className="field-label">Round</span>
+        <select
+          className="field-input"
+          value={selectedRound}
+          onChange={(event) => onSelectRound(event.target.value)}
+        >
+          <option value="">All rounds</option>
+          {rounds.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <span className="field-help">Filter fixtures by round.</span>
       </label>
     </div>
   )
