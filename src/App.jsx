@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import SavedTeamsView from './components/SavedTeamsView'
 import TopScorersView from './components/TopScorersView'
-import useFavouriteTeams from './hooks/useFavouriteTeams'
 
 const API_BASE = 'https://api-basketball.squadi.com/livescores'
 const LADDER_BASE_URL = 'https://registration.basketballconnect.com/livescorePublicLadder'
@@ -282,8 +281,8 @@ function LadderTable({
   error,
   onSelectTeam,
   selectedTeamId,
-  isFavouriteTeam,
-  onToggleFavourite
+  savedTeams,
+  onToggleSaveTeam
 }) {
   if (loading) {
     return <LoadingMessage text="Loading ladder…" />
@@ -317,7 +316,7 @@ function LadderTable({
           {ladderRows.map((team) => {
             const teamId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
             const isSelected = selectedTeamId != null && String(selectedTeamId) === String(teamId)
-            const isFavourite = isFavouriteTeam?.(teamId)
+            const isSaved = savedTeams?.some((saved) => String(saved.id) === String(teamId))
             return (
               <tr
                 key={teamId ?? team.name}
@@ -336,10 +335,13 @@ function LadderTable({
                       aria-pressed={isSaved}
                       onClick={(event) => {
                         event.stopPropagation()
-                        onToggleFavourite?.(teamId)
+                        onToggleSaveTeam?.({
+                          ...team,
+                          id: teamId
+                        })
                       }}
                     >
-                      {isFavourite ? '★' : '☆'}
+                      {isSaved ? '★ Saved' : '☆ Save'}
                     </button>
                   </div>
                 </td>
@@ -666,8 +668,28 @@ export default function App() {
   const [matchesLoading, setMatchesLoading] = useState(false)
   const [matchesError, setMatchesError] = useState(null)
 
+  const [savedTeams, setSavedTeams] = useState(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const stored = window.localStorage.getItem('hoopsHub.savedTeams')
+      if (!stored) return []
+      const parsed = JSON.parse(stored)
+      if (!Array.isArray(parsed)) return []
+      return parsed
+        .filter((team) => team && (team.id != null || team.teamId != null || team.teamUniqueKey != null))
+        .map((team) => ({
+          ...team,
+          id: team.id != null ? team.id : team.teamId != null ? team.teamId : team.teamUniqueKey
+        }))
+    } catch (error) {
+      console.warn('Failed to parse saved teams from storage', error)
+      return []
+    }
+  })
+
   const [selectedTeamId, setSelectedTeamId] = useState(null)
   const [selectedRoundName, setSelectedRoundName] = useState('')
+  const pendingSelectionRef = useRef({ divisionId: null, teamId: null })
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -685,6 +707,15 @@ export default function App() {
       window.localStorage.removeItem('hoopsHub.selectedTeamId')
     }
   }, [selectedTeamId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem('hoopsHub.savedTeams', JSON.stringify(savedTeams))
+    } catch (error) {
+      console.warn('Failed to persist saved teams', error)
+    }
+  }, [savedTeams])
 
   useEffect(() => {
     setCompetitions([])
@@ -782,16 +813,44 @@ export default function App() {
     )
   }, [competitions, selectedCompetitionId])
 
-  const { favourites, isFavourite, toggleFavourite, setFavourite } = useFavouriteTeams({
-    orgKey: organisationKey,
-    competitionId: selectedCompetition?.id ?? '',
-    divisionId: selectedDivisionId ?? ''
-  })
+  const competitionsIndex = useMemo(() => {
+    const map = new Map()
+    for (const competition of competitions) {
+      const name =
+        competition.longName ||
+        competition.name ||
+        competition.competitionName ||
+        competition.description ||
+        ''
+      const identifiers = [
+        competition.id,
+        competition.uniqueKey,
+        competition.competitionId,
+        competition.competitionUniqueKey
+      ]
+      for (const identifier of identifiers) {
+        if (identifier == null) continue
+        map.set(String(identifier), name)
+      }
+    }
+    return map
+  }, [competitions])
+
+  const divisionsIndex = useMemo(() => {
+    const map = new Map()
+    for (const division of divisions) {
+      if (division?.id == null) continue
+      const name = division.name || division.longName || division.divisionName || ''
+      map.set(String(division.id), name)
+    }
+    return map
+  }, [divisions])
 
   useEffect(() => {
     if (!selectedCompetition) {
       setDivisions([])
       setSelectedDivisionId(null)
+      pendingSelectionRef.current = { divisionId: null, teamId: null }
       return
     }
 
@@ -809,13 +868,28 @@ export default function App() {
         }
         const data = await response.json()
         if (!cancelled) {
-          setDivisions(Array.isArray(data) ? data : [])
-          if (Array.isArray(data) && data.length > 0) {
-            setSelectedDivisionId(data[0].id)
-          } else {
-            setSelectedDivisionId(null)
+          const list = Array.isArray(data) ? data : []
+          setDivisions(list)
+          const pendingSelection = pendingSelectionRef.current || { divisionId: null, teamId: null }
+          const pendingDivisionId = pendingSelection.divisionId
+          let nextDivisionId = null
+          if (pendingDivisionId != null) {
+            const match = list.find((division) => Number(division.id) === Number(pendingDivisionId))
+            if (match) {
+              nextDivisionId = match.id
+            }
           }
-          setSelectedTeamId(null)
+          if (nextDivisionId == null) {
+            nextDivisionId = list.length > 0 ? list[0].id : null
+          }
+          setSelectedDivisionId(nextDivisionId)
+          if (!pendingSelection.teamId) {
+            setSelectedTeamId(null)
+          }
+          pendingSelectionRef.current = {
+            divisionId: null,
+            teamId: pendingSelection.teamId
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -898,10 +972,23 @@ export default function App() {
 
           setLadderState({ rows, lastResults, nextResults })
           setSelectedTeamId((current) => {
+            const pendingSelection = pendingSelectionRef.current || { divisionId: null, teamId: null }
+            const pendingTeamId = pendingSelection.teamId != null ? String(pendingSelection.teamId) : null
+            if (
+              pendingTeamId &&
+              rows.some(
+                (team) =>
+                  String(team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName) === pendingTeamId
+              )
+            ) {
+              pendingSelectionRef.current = { divisionId: pendingSelection.divisionId, teamId: null }
+              return pendingTeamId
+            }
             const matchesCurrent =
               current != null &&
               rows.some((team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(current))
             if (matchesCurrent) {
+              pendingSelectionRef.current = { divisionId: pendingSelection.divisionId, teamId: null }
               return current
             }
             if (typeof window !== 'undefined') {
@@ -910,9 +997,11 @@ export default function App() {
                 storedTeamId &&
                 rows.some((team) => String(team.id ?? team.teamId ?? team.teamUniqueKey) === String(storedTeamId))
               ) {
+                pendingSelectionRef.current = { divisionId: pendingSelection.divisionId, teamId: null }
                 return storedTeamId
               }
             }
+            pendingSelectionRef.current = { divisionId: pendingSelection.divisionId, teamId: null }
             return null
           })
         }
@@ -994,6 +1083,292 @@ export default function App() {
     })
   }, [ladderState])
 
+  const ladderTeamMap = useMemo(() => {
+    return new Map(
+      (ladderRows || [])
+        .map((team) => {
+          const teamId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
+          if (teamId == null) {
+            return null
+          }
+          return [String(teamId), team]
+        })
+        .filter(Boolean)
+    )
+  }, [ladderRows])
+
+  const competitionSelectionIdentifiers = useMemo(() => {
+    const identifiers = new Set()
+    if (selectedCompetitionId != null) {
+      identifiers.add(String(selectedCompetitionId))
+    }
+    if (selectedCompetition) {
+      const values = [
+        selectedCompetition.id,
+        selectedCompetition.uniqueKey,
+        selectedCompetition.competitionId,
+        selectedCompetition.competitionUniqueKey
+      ]
+      for (const value of values) {
+        if (value != null) {
+          identifiers.add(String(value))
+        }
+      }
+    }
+    return identifiers
+  }, [selectedCompetition, selectedCompetitionId])
+
+  const savedTeamsEnriched = useMemo(() => {
+    return savedTeams
+      .map((team) => {
+        if (!team) return null
+        const candidateId =
+          team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName ?? team.team?.id
+        if (candidateId == null) {
+          return null
+        }
+        const normalizedId = String(candidateId)
+        const ladderTeam = ladderTeamMap.get(normalizedId)
+
+        const competitionIdentifiers = []
+        if (team.competitionId != null) {
+          competitionIdentifiers.push(String(team.competitionId))
+        }
+        if (team.competitionUniqueKey != null) {
+          competitionIdentifiers.push(String(team.competitionUniqueKey))
+        }
+
+        let competitionName = team.competitionName ?? null
+        for (const identifier of competitionIdentifiers) {
+          if (competitionsIndex.has(identifier)) {
+            competitionName = competitionsIndex.get(identifier) || competitionName
+            break
+          }
+        }
+
+        const divisionIdentifiers = []
+        if (team.divisionId != null) {
+          divisionIdentifiers.push(String(team.divisionId))
+        }
+
+        let divisionName =
+          team.divisionName ?? ladderTeam?.divisionName ?? ladderTeam?.poolName ?? null
+        for (const identifier of divisionIdentifiers) {
+          if (divisionsIndex.has(identifier)) {
+            divisionName = divisionsIndex.get(identifier) || divisionName
+            break
+          }
+        }
+
+        return {
+          ...team,
+          id: normalizedId,
+          name:
+            ladderTeam?.name ??
+            ladderTeam?.teamName ??
+            ladderTeam?.team?.name ??
+            team.name ??
+            team.teamName ??
+            `Team ${normalizedId}`,
+          competitionName: competitionName || null,
+          divisionName: divisionName || null
+        }
+      })
+      .filter(Boolean)
+  }, [savedTeams, ladderTeamMap, competitionsIndex, divisionsIndex])
+
+  const savedTeamsForCurrentSelection = useMemo(() => {
+    if (savedTeamsEnriched.length === 0) {
+      return []
+    }
+    const divisionIdNumber = selectedDivisionId != null ? Number(selectedDivisionId) : NaN
+    return savedTeamsEnriched.filter((team) => {
+      if (!team) return false
+      const teamId = team.id != null ? String(team.id) : null
+      if (!teamId || !ladderTeamMap.has(teamId)) {
+        return false
+      }
+      const teamCompetitionIdentifiers = new Set()
+      if (team.competitionId != null) {
+        teamCompetitionIdentifiers.add(String(team.competitionId))
+      }
+      if (team.competitionUniqueKey != null) {
+        teamCompetitionIdentifiers.add(String(team.competitionUniqueKey))
+      }
+      const matchesCompetition = Array.from(teamCompetitionIdentifiers).some((identifier) =>
+        competitionSelectionIdentifiers.has(identifier)
+      )
+      if (!matchesCompetition) {
+        return false
+      }
+      if (Number.isNaN(divisionIdNumber)) {
+        return true
+      }
+      if (team.divisionId != null && Number(team.divisionId) === divisionIdNumber) {
+        return true
+      }
+      const ladderTeam = ladderTeamMap.get(teamId)
+      if (ladderTeam?.divisionId != null && Number(ladderTeam.divisionId) === divisionIdNumber) {
+        return true
+      }
+      return false
+    })
+  }, [
+    savedTeamsEnriched,
+    ladderTeamMap,
+    competitionSelectionIdentifiers,
+    selectedDivisionId
+  ])
+
+  const savedTeamIdsForCurrentSelection = useMemo(
+    () => savedTeamsForCurrentSelection.map((team) => String(team.id)),
+    [savedTeamsForCurrentSelection]
+  )
+
+  function normalizeTeamRecord(teamLike, extras = {}) {
+    if (!teamLike) {
+      return null
+    }
+    const candidateId =
+      teamLike.id ??
+      teamLike.teamId ??
+      teamLike.teamUniqueKey ??
+      teamLike.teamName ??
+      teamLike.team?.id ??
+      teamLike.team?.name
+    if (candidateId == null) {
+      return null
+    }
+    const id = String(candidateId)
+    const record = {
+      id,
+      name:
+        extras.name ??
+        teamLike.name ??
+        teamLike.teamName ??
+        teamLike.team?.name ??
+        `Team ${id}`,
+      competitionId: extras.competitionId ?? null,
+      competitionUniqueKey: extras.competitionUniqueKey ?? null,
+      competitionName:
+        extras.competitionName ??
+        teamLike.competitionName ??
+        teamLike.competitionLongName ??
+        null,
+      divisionId: extras.divisionId ?? null,
+      divisionName:
+        extras.divisionName ??
+        teamLike.divisionName ??
+        teamLike.poolName ??
+        teamLike.team?.divisionName ??
+        null
+    }
+    if (record.competitionId != null) {
+      record.competitionId = String(record.competitionId)
+    }
+    if (record.competitionUniqueKey != null) {
+      record.competitionUniqueKey = String(record.competitionUniqueKey)
+    }
+    if (record.divisionId != null) {
+      const parsedDivision = Number(record.divisionId)
+      record.divisionId = Number.isNaN(parsedDivision) ? null : parsedDivision
+    }
+    return record
+  }
+
+  function handleToggleSaveTeam(teamLike) {
+    const divisionMeta = divisions.find(
+      (division) => Number(division.id) === Number(selectedDivisionId)
+    )
+    const record = normalizeTeamRecord(teamLike, {
+      competitionId: selectedCompetitionId != null ? String(selectedCompetitionId) : null,
+      competitionUniqueKey:
+        selectedCompetition?.uniqueKey != null
+          ? String(selectedCompetition.uniqueKey)
+          : null,
+      competitionName:
+        selectedCompetition?.longName ||
+        selectedCompetition?.name ||
+        selectedCompetition?.competitionName ||
+        teamLike?.competitionName ||
+        null,
+      divisionId:
+        selectedDivisionId != null
+          ? Number(selectedDivisionId)
+          : divisionMeta?.id != null
+            ? Number(divisionMeta.id)
+            : null,
+      divisionName:
+        divisionMeta?.name ||
+        divisionMeta?.longName ||
+        divisionMeta?.divisionName ||
+        teamLike?.divisionName ||
+        teamLike?.poolName ||
+        null
+    })
+    if (!record) {
+      return
+    }
+    setSavedTeams((prev) => {
+      const existingIndex = prev.findIndex((item) => String(item.id) === record.id)
+      if (existingIndex >= 0) {
+        const next = [...prev]
+        next[existingIndex] = { ...prev[existingIndex], ...record }
+        return next
+      }
+      return [...prev, record]
+    })
+  }
+
+  function handleRemoveSavedTeam(teamId) {
+    if (teamId == null) {
+      return
+    }
+    const normalizedId = String(teamId)
+    setSavedTeams((prev) => prev.filter((team) => String(team.id) !== normalizedId))
+    setSelectedTeamId((current) => (String(current) === normalizedId ? null : current))
+    const pendingSelection = pendingSelectionRef.current || { divisionId: null, teamId: null }
+    if (pendingSelection.teamId != null && String(pendingSelection.teamId) === normalizedId) {
+      pendingSelectionRef.current = {
+        divisionId: pendingSelection.divisionId,
+        teamId: null
+      }
+    }
+  }
+
+  function handleSelectSavedTeam(team) {
+    if (!team) {
+      return
+    }
+    const candidateId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
+    if (candidateId == null) {
+      return
+    }
+    const normalizedTeamId = String(candidateId)
+    const competitionIdentifier =
+      team.competitionId != null
+        ? String(team.competitionId)
+        : team.competitionUniqueKey != null
+          ? String(team.competitionUniqueKey)
+          : null
+    const divisionIdentifier =
+      team.divisionId != null && !Number.isNaN(Number(team.divisionId))
+        ? Number(team.divisionId)
+        : null
+    pendingSelectionRef.current = {
+      divisionId: divisionIdentifier,
+      teamId: normalizedTeamId
+    }
+    if (competitionIdentifier != null) {
+      setSelectedCompetitionId(competitionIdentifier)
+    }
+    if (divisionIdentifier != null) {
+      setSelectedDivisionId(divisionIdentifier)
+    }
+    setSelectedTeamId(normalizedTeamId)
+    setActiveTab('fixtures')
+  }
+
   const selectedTeam = useMemo(() => {
     if (!selectedTeamId) return null
     return (
@@ -1035,34 +1410,6 @@ export default function App() {
       (match) => (match.round?.name || '').trim() === selectedRoundName
     )
   }, [filteredMatches, selectedRoundName])
-
-  const favouriteTeamDetails = useMemo(() => {
-    if (!Array.isArray(favourites) || favourites.length === 0) {
-      return []
-    }
-
-    const teamMap = new Map(
-      ladderRows.map((team) => {
-        const teamId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
-        return [String(teamId), team]
-      })
-    )
-
-    return favourites.map((teamId) => {
-      const normalisedId = String(teamId)
-      const team = teamMap.get(normalisedId)
-      const name =
-        team?.name ?? team?.teamName ?? team?.team?.name ?? `Team ${normalisedId}`
-      return {
-        id: normalisedId,
-        name,
-        competitionId:
-          selectedCompetitionId != null ? String(selectedCompetitionId) : undefined,
-        divisionId:
-          selectedDivisionId != null ? Number(selectedDivisionId) : undefined
-      }
-    })
-  }, [favourites, ladderRows, selectedCompetitionId, selectedDivisionId])
 
   useEffect(() => {
     if (!selectedRoundName) {
@@ -1127,7 +1474,7 @@ export default function App() {
 
           {(activeTab === 'ladder' || activeTab === 'fixtures') && (
             <>
-              {favouriteTeamDetails.length > 0 && (
+              {savedTeamsForCurrentSelection.length > 0 && (
                 <div
                   className="card"
                   style={{
@@ -1157,7 +1504,7 @@ export default function App() {
                     </button>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {favouriteTeamDetails.map((team) => {
+                    {savedTeamsForCurrentSelection.map((team) => {
                       const isSelected =
                         selectedTeamId != null &&
                         String(selectedTeamId) === String(team.id)
@@ -1184,41 +1531,15 @@ export default function App() {
                 teams={ladderRows}
                 selectedTeamId={selectedTeamId}
                 onSelectTeam={(value) => setSelectedTeamId(value || null)}
-                favourites={favourites}
+                favourites={savedTeamIdsForCurrentSelection}
+              />
+
+              <SavedTeamsView
+                savedTeams={savedTeamsEnriched}
+                onSelectSavedTeam={handleSelectSavedTeam}
+                onRemoveTeam={handleRemoveSavedTeam}
               />
             </>
-          )}
-
-          {activeTab !== 'settings' && (
-            <SavedTeamsView
-              savedTeams={favouriteTeamDetails}
-              onSelectTeam={(teamId) => {
-                const team = favouriteTeamDetails.find(
-                  (t) => String(t.id) === String(teamId)
-                )
-                if (!team) return
-
-                if (team.competitionId != null) {
-                  setSelectedCompetitionId(String(team.competitionId))
-                }
-                if (team.divisionId != null) {
-                  setSelectedDivisionId(Number(team.divisionId))
-                }
-
-                setSelectedTeamId(teamId == null ? null : String(teamId))
-                setActiveTab('fixtures')
-              }}
-              onRemoveTeam={(teamId) => {
-                const normalizedId = teamId == null ? null : String(teamId)
-                if (normalizedId == null) {
-                  return
-                }
-                setFavourite(normalizedId, false)
-                setSelectedTeamId((current) =>
-                  String(current) === normalizedId ? null : current
-                )
-              }}
-            />
           )}
 
           {activeTab === 'ladder' ? (
@@ -1235,8 +1556,8 @@ export default function App() {
                   setSelectedTeamId((current) => (String(current) === String(teamId) ? null : String(teamId)))
                 }
                 selectedTeamId={selectedTeamId}
-                isFavouriteTeam={isFavourite}
-                onToggleFavourite={toggleFavourite}
+                savedTeams={savedTeamsEnriched}
+                onToggleSaveTeam={handleToggleSaveTeam}
               />
             </div>
           ) : (
