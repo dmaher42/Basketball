@@ -38,8 +38,7 @@ const DEFAULT_COMPETITION_ID = String(import.meta.env.VITE_COMPETITION_ID ?? '')
 const TABS = [
   { id: 'ladder', label: 'Ladder' },
   { id: 'fixtures', label: 'Fixtures' },
-  { id: 'stats', label: 'Stats' },
-  { id: 'settings', label: 'Connection' }
+  { id: 'stats', label: 'Stats' }
 ]
 
 function formatDateTime(isoString) {
@@ -62,6 +61,74 @@ function formatDateTime(isoString) {
       minute: '2-digit'
     })
   }
+}
+
+function Modal({ titleId, onClose, children }) {
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        onClose?.()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+        padding: 16
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose?.()
+        }
+      }}
+    >
+      <div
+        className="modal-card"
+        style={{
+          background: '#fff',
+          color: '#111',
+          borderRadius: 12,
+          maxWidth: 720,
+          width: '100%',
+          maxHeight: '90vh',
+          overflow: 'auto',
+          padding: 20,
+          position: 'relative'
+        }}
+      >
+        <button
+          aria-label="Close"
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: 8,
+            right: 10,
+            border: 0,
+            background: 'transparent',
+            fontSize: 20,
+            cursor: 'pointer'
+          }}
+        >
+          ×
+        </button>
+        {children}
+      </div>
+    </div>
+  )
 }
 
 function MatchCard({ match, selectedTeamId, onOpenReview }) {
@@ -727,16 +794,16 @@ function StatsView({ organisationKey, yearRefId, selectedCompetition, selectedDi
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState(() => {
-    const hasEnvConfig = (ORG_KEY ?? '').toString().trim() !== '' && Number.isFinite(YEAR_REF_ID)
-    return hasEnvConfig ? 'fixtures' : 'settings'
-  })
+  const [activeTab, setActiveTab] = useState('ladder')
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [reviewMatch, setReviewMatch] = useState(null)
 
   const [organisationKeyInput, setOrganisationKeyInput] = useState(() => (ORG_KEY ?? '').trim())
   const [yearRefIdInput, setYearRefIdInput] = useState(() =>
     Number.isFinite(YEAR_REF_ID) ? String(YEAR_REF_ID) : (import.meta.env.VITE_YEAR_REF_ID ?? '').trim()
   )
+
+  const settingsAutoOpenRef = useRef(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -764,6 +831,19 @@ export default function App() {
   const parsedYearRefId = Number(yearRefIdInput)
   const yearRefId = Number.isFinite(parsedYearRefId) ? parsedYearRefId : null
   const hasValidConfig = organisationKey !== '' && yearRefId != null
+
+  useEffect(() => {
+    if (settingsAutoOpenRef.current) {
+      return
+    }
+    settingsAutoOpenRef.current = true
+    if (typeof window === 'undefined') {
+      return
+    }
+    if (!hasValidConfig) {
+      setIsSettingsOpen(true)
+    }
+  }, [hasValidConfig])
 
   const [competitions, setCompetitions] = useState([])
   const [competitionLoading, setCompetitionLoading] = useState(true)
@@ -844,7 +924,7 @@ export default function App() {
     if (!hasValidConfig) {
       setCompetitionLoading(false)
       setCompetitionError(
-        'Open the Connection tab to enter your BasketballConnect organisation key and year reference ID.'
+        'Use the Connection settings gear to enter your BasketballConnect organisation key and year reference ID.'
       )
       return
     }
@@ -1594,12 +1674,33 @@ export default function App() {
 
       <main className="container">
         <header className="page-header">
-          <div className="page-header__intro">
-            <h1>Live Scores</h1>
-            <p className="small muted">
-              Browse ladders, fixtures, and player stats for BasketballConnect competitions, or
-              configure your connection from the tabs above.
-            </p>
+          <div className="page-header__intro" style={{ width: '100%' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 12,
+                flexWrap: 'wrap'
+              }}
+            >
+              <div style={{ flex: '1 1 240px' }}>
+                <h1>Live Scores</h1>
+                <p className="small muted">
+                  Browse ladders, fixtures, and player stats for BasketballConnect competitions. Use
+                  the gear button to manage your connection settings at any time.
+                </p>
+              </div>
+              <button
+                className="btn"
+                type="button"
+                title="Connection settings"
+                aria-label="Connection settings"
+                onClick={() => setIsSettingsOpen(true)}
+              >
+                ⚙️ Connection
+              </button>
+            </div>
           </div>
           {hasValidConfig && (
             <CompetitionSelectors
@@ -1661,15 +1762,6 @@ export default function App() {
               setActiveTab('fixtures')
               setReviewMatch(null)
             }}
-          />
-        ) : activeTab === 'settings' ? (
-          <SettingsView
-            organisationKey={organisationKeyInput}
-            onOrganisationKeyChange={setOrganisationKeyInput}
-            yearRefId={yearRefIdInput}
-            onYearRefIdChange={setYearRefIdInput}
-            hasValidConfig={hasValidConfig}
-            defaultCompetitionId={DEFAULT_COMPETITION_ID}
           />
         ) : hasValidConfig ? (
           <div className="stack-lg">
@@ -1751,9 +1843,27 @@ export default function App() {
             )}
           </div>
         ) : (
-          <ConfigurationRequired onOpenSettings={() => setActiveTab('settings')} />
+          <ConfigurationRequired onOpenSettings={() => setIsSettingsOpen(true)} />
         )}
       </main>
+
+      {isSettingsOpen && (
+        <Modal titleId="settings-heading" onClose={() => setIsSettingsOpen(false)}>
+          <div className="stack-lg">
+            <h2 id="settings-heading" className="section-title" style={{ marginTop: 0 }}>
+              Connection settings
+            </h2>
+            <SettingsView
+              organisationKey={organisationKeyInput}
+              onOrganisationKeyChange={setOrganisationKeyInput}
+              yearRefId={yearRefIdInput}
+              onYearRefIdChange={setYearRefIdInput}
+              hasValidConfig={hasValidConfig}
+              defaultCompetitionId={DEFAULT_COMPETITION_ID}
+            />
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
