@@ -727,7 +727,7 @@ function StatsView({ organisationKey, yearRefId, selectedCompetition, selectedDi
 export default function App() {
   const [activeTab, setActiveTab] = useState(() => {
     const hasEnvConfig = (ORG_KEY ?? '').toString().trim() !== '' && Number.isFinite(YEAR_REF_ID)
-    return hasEnvConfig ? 'ladder' : 'settings'
+    return hasEnvConfig ? 'fixtures' : 'settings'
   })
   const [reviewMatch, setReviewMatch] = useState(null)
 
