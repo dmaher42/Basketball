@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import SavedTeamsView from './components/SavedTeamsView'
 import TopScorersView from './components/TopScorersView'
 
 const API_BASE = 'https://api-basketball.squadi.com/livescores'
@@ -286,7 +287,9 @@ function LadderTable({
   loading,
   error,
   onSelectTeam,
-  selectedTeamId
+  selectedTeamId,
+  savedTeams,
+  onToggleSaveTeam
 }) {
   if (loading) {
     return <LoadingMessage text="Loading ladder…" />
@@ -320,6 +323,9 @@ function LadderTable({
           {ladderRows.map((team) => {
             const teamId = team.id ?? team.teamId ?? team.teamUniqueKey ?? team.teamName
             const isSelected = selectedTeamId != null && String(selectedTeamId) === String(teamId)
+            const isSaved = savedTeams?.some(
+              (saved) => String(saved.id) === String(teamId)
+            )
             return (
               <tr
                 key={teamId ?? team.name}
@@ -343,16 +349,13 @@ function LadderTable({
                     </div>
                     <button
                       className="btn small"
+                      aria-pressed={isSaved}
                       onClick={(event) => {
                         event.stopPropagation()
-                        if (String(selectedTeamId) === String(teamId)) {
-                          onSelectTeam(null)
-                        } else {
-                          onSelectTeam(String(teamId))
-                        }
+                        onToggleSaveTeam?.({ ...team, id: teamId })
                       }}
                     >
-                      {String(selectedTeamId) === String(teamId) ? '★ Saved' : '☆ Save'}
+                      {isSaved ? '★ Saved' : '☆ Save'}
                     </button>
                   </div>
                 </td>
@@ -683,8 +686,29 @@ export default function App() {
   const [matchesLoading, setMatchesLoading] = useState(false)
   const [matchesError, setMatchesError] = useState(null)
 
+  const [savedTeams, setSavedTeams] = useState(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const stored = window.localStorage.getItem('hoopsHub.savedTeams')
+      if (!stored) return []
+      const parsed = JSON.parse(stored)
+      return Array.isArray(parsed) ? parsed : []
+    } catch (error) {
+      console.warn('Failed to parse saved teams from storage', error)
+      return []
+    }
+  })
   const [selectedTeamId, setSelectedTeamId] = useState(null)
   const [selectedRoundName, setSelectedRoundName] = useState('')
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem('hoopsHub.savedTeams', JSON.stringify(savedTeams))
+    } catch (error) {
+      console.warn('Failed to persist saved teams', error)
+    }
+  }, [savedTeams])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1047,6 +1071,43 @@ export default function App() {
     )
   }, [filteredMatches, selectedRoundName])
 
+  const handleSaveTeam = (team) => {
+    if (!team) return
+    const teamId =
+      team.id ?? team.teamId ?? team.teamUniqueKey ?? team.team?.id ?? team.teamName ?? null
+    if (teamId == null) {
+      return
+    }
+    const normalizedId = String(teamId)
+    const teamName = team.name ?? team.teamName ?? team.team?.name ?? 'Unknown team'
+    setSavedTeams((current) => {
+      if (current.some((entry) => String(entry.id) === normalizedId)) {
+        return current.filter((entry) => String(entry.id) !== normalizedId)
+      }
+      return [...current, { id: normalizedId, name: teamName }]
+    })
+  }
+
+  const handleSelectSavedTeam = (teamId) => {
+    if (teamId == null) {
+      setSelectedTeamId(null)
+      return
+    }
+    const normalizedId = String(teamId)
+    setSelectedTeamId(normalizedId)
+    setActiveTab((current) => {
+      if (current === 'settings') return 'ladder'
+      if (current === 'stats') return 'fixtures'
+      return current
+    })
+  }
+
+  const handleRemoveSavedTeam = (teamId) => {
+    const normalizedId = teamId == null ? null : String(teamId)
+    setSavedTeams((current) => current.filter((entry) => String(entry.id) !== normalizedId))
+    setSelectedTeamId((current) => (String(current) === normalizedId ? null : current))
+  }
+
   useEffect(() => {
     if (!selectedRoundName) {
       return
@@ -1113,10 +1174,19 @@ export default function App() {
             />
           )}
 
+          {activeTab !== 'settings' && (
+            <SavedTeamsView
+              savedTeams={savedTeams}
+              onSelectTeam={handleSelectSavedTeam}
+              onRemoveTeam={handleRemoveSavedTeam}
+            />
+          )}
+
           {activeTab === 'ladder' ? (
             <div>
               <p className="small muted" style={{ marginBottom: 12 }}>
-                Click or tap a team to highlight it and filter fixtures.
+                Click or tap a team to highlight it and filter fixtures. Use the ☆ Save button to store
+                favourites for quick access later.
               </p>
               <LadderTable
                 ladderRows={ladderRows}
@@ -1126,6 +1196,8 @@ export default function App() {
                   setSelectedTeamId((current) => (String(current) === String(teamId) ? null : String(teamId)))
                 }
                 selectedTeamId={selectedTeamId}
+                savedTeams={savedTeams}
+                onToggleSaveTeam={handleSaveTeam}
               />
             </div>
           ) : (
