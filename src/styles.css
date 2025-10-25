@@ -104,10 +104,43 @@ a {
 
 .page-header {
   margin-bottom: var(--space-xl);
+  display: grid;
+  gap: var(--space-lg);
 }
 
-.page-header p {
-  margin-top: var(--space-xs);
+.page-header__intro {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.page-header__intro p {
+  margin: 0;
+}
+
+@media (min-width: 768px) {
+  .page-header {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
+    align-items: end;
+  }
+}
+
+.selectors {
+  width: 100%;
+}
+
+.selectors--header {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 20px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: var(--shadow-elevated);
+  padding: var(--space-md);
+  backdrop-filter: blur(12px);
+}
+
+@media (min-width: 768px) {
+  .selectors--header {
+    padding: var(--space-md) var(--space-lg);
+  }
 }
 
 .card {
